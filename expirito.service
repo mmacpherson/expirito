@@ -1,0 +1,9 @@
+[Unit]
+Description=Expirito Service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/bin/expirito
+
+[Install]
+WantedBy=default.target
