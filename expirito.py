@@ -3,6 +3,7 @@
 import argparse
 import logging
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -82,7 +83,7 @@ def clean_folder(
                 logging.info(action)
 
 
-def read_config(config_path: str) -> Dict[str, Any]:
+def read_config(config_path: Path) -> Dict[str, Any]:
     """Read the configuration file.
 
     Args:
@@ -106,6 +107,10 @@ def parse_arguments() -> argparse.Namespace:
         description="Clean up old files in specified directories."
     )
     parser.add_argument(
+        "-c", "--config-file", type=str, help="Path to the custom configuration file."
+    )
+    parser.add_argument(
+        "-n",
         "--dry-run",
         action="store_true",
         help="Perform a dry run without actually making changes.",
@@ -113,7 +118,7 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main(config_path: str, dry_run: bool) -> None:
+def main(config_path: Path, dry_run: bool) -> None:
     """Main function to clean up files based on the configuration.
 
     Args:
@@ -135,5 +140,11 @@ def main(config_path: str, dry_run: bool) -> None:
 
 if __name__ == "__main__":
     args = parse_arguments()
-    config_path = str(Path.home() / ".config/expirito/config.yaml")
+
+    default_config_path = Path.home() / ".config/expirito/config.yaml"
+    config_path = Path(args.config_file) if args.config_file else default_config_path
+    if not config_path.is_file():
+        logging.error(f"Configuration file not found at {config_path}")
+        sys.exit(1)
+
     main(config_path, args.dry_run)
