@@ -6,7 +6,7 @@ pkgrel=1
 epoch=
 pkgdesc="A utility to clean up old files and empty directories"
 arch=("any")
-url="https://example.com"
+url="https://github.com/mmacpherson/expirito"
 license=("MIT")
 depends=("python" "python-yaml")
 makedepends=("git")
@@ -19,7 +19,7 @@ install=
 changelog=
 
 source=(
-  "https://example.com/your-repo-url.git"
+  "https://github.com/mmacpherson/expirito.git"
 )
 sha256sums=("SKIP")
 
