@@ -6,11 +6,16 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import yaml
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s: %(message)s")
+
+
+def copy2_nofollow(*args):
+    """Modified version of copy2 to pass to shutil.move"""
+    return shutil.copy2(*args, follow_symlinks=False)
 
 
 def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> Path:
@@ -37,9 +42,42 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
             destination_directory.mkdir(parents=True)
 
     if not dry_run:
-        shutil.move(str(file_path), str(destination_path))
+        shutil.move(str(file_path), str(destination_path), copy_function=copy2_nofollow)
 
     return destination_path
+
+
+def is_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
+    """Check if a file or directory is older than the specified age limit.
+
+    Args:
+        path: The path to the file or directory.
+        age_limit: The age limit in days.
+        current_time: The current time in seconds since the epoch.
+
+    Returns:
+        True if the entry is older than the age limit, False otherwise.
+    """
+    age_in_seconds = current_time - path.stat().st_mtime
+    age_in_days = age_in_seconds / (60 * 60 * 24)
+    return age_in_days > age_limit
+
+
+def is_tree_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
+    """Check if all files and subdirectories under a given path are older than
+    the specified age limit.
+
+    Args:
+        path: The path to the directory.
+        age_limit: The age limit in days.
+        current_time: The current time in seconds since the epoch.
+
+    Returns:
+        True if all entries in the tree are older than the age limit, False otherwise.
+    """
+    return is_old_enough(path, age_limit, current_time) and all(
+        is_old_enough(p, age_limit, current_time) for p in path.glob("**/*")
+    )
 
 
 def clean_folder(
@@ -59,28 +97,46 @@ def clean_folder(
         dry_run: If True, print the actions without actually making changes.
     """
     current_time = time.time()
-    for entry_path in folder_path.glob("**/*"):
-        entry_age_in_seconds = current_time - entry_path.stat().st_atime
-        entry_age_in_days = entry_age_in_seconds / (60 * 60 * 24)
-
-        if entry_age_in_days > days_old:
-            if entry_path.is_file() or (
-                entry_path.is_dir() and not any(entry_path.iterdir())
+    for entry_path in folder_path.iterdir():
+        action = None
+        if entry_path.is_symlink():
+            target = entry_path.resolve(strict=False)
+            if not target.exists():
+                if holding_directory:
+                    action = "move"
+                else:
+                    action = "delete"
+        else:
+            if (
+                entry_path.is_file()
+                and is_old_enough(entry_path, days_old, current_time)
+            ) or (
+                entry_path.is_dir()
+                and is_tree_old_enough(entry_path, days_old, current_time)
             ):
                 if holding_directory:
-                    destination_path = move_to_holding(
-                        entry_path, holding_directory, dry_run
-                    )
-                    action = f"Moved {entry_path} to {destination_path}"
+                    action = "move"
                 else:
-                    if not dry_run:
-                        if entry_path.is_file():
-                            entry_path.unlink()
-                        else:
-                            entry_path.rmdir()
-                    action = f"Deleted {entry_path}"
+                    action = "delete"
 
-                logging.info(action)
+        if action is None:
+            continue
+        elif action == "move":
+            destination_path = move_to_holding(
+                entry_path, cast(Path, holding_directory), dry_run
+            )
+            action_log = f"Moved {entry_path} to {destination_path}"
+        elif action == "delete":
+            if not dry_run:
+                if entry_path.is_file() or entry_path.is_symlink():
+                    entry_path.unlink()
+                else:
+                    entry_path.rmdir()
+            action_log = f"Deleted {entry_path}"
+        else:
+            raise NotImplementedError(f"Unexpected action state [{action}].")
+
+        logging.info(action_log)
 
 
 def read_config(config_path: Path) -> Dict[str, Any]:
@@ -94,6 +150,27 @@ def read_config(config_path: Path) -> Dict[str, Any]:
     """
     with open(config_path, "rt") as f:
         config = yaml.safe_load(f)
+
+    # Light validation of config file.
+    all_config_dirs = [config["holding_directory"]] + [
+        d["path"] for d in config["directories"]
+    ]
+    for config_dir in all_config_dirs:
+        config_path = Path(config_dir)
+        if not config_path.exists():
+            logging.error(f"Configuration path [{config_path}] does not exist.")
+            sys.exit(1)
+        if not config_path.is_absolute():
+            logging.error(
+                f"Configuration path [{config_path}] is not an absolute path."
+            )
+            sys.exit(1)
+    for d in config["directories"]:
+        age_limit = d["age_limit"]
+        if not (isinstance(age_limit, int) and (age_limit > 0)):
+            logging.error(f"Invalid age_limit [{age_limit}] provided.")
+            sys.exit(1)
+
     return config
 
 
@@ -133,9 +210,14 @@ def main(config_path: Path, dry_run: bool) -> None:
     for directory in config["directories"]:
         folder_path = Path(directory["path"])
         days_old = directory["age_limit"]
+
+        # Move to holding pass.
         clean_folder(folder_path, days_old, holding_directory, dry_run)
 
-    clean_folder(holding_directory, holding_age_limit, None, dry_run)
+        # Delete from holding pass.
+        deletion_path = holding_directory / str(folder_path).lstrip("/")
+        if deletion_path.exists():
+            clean_folder(deletion_path, holding_age_limit, None, dry_run)
 
 
 if __name__ == "__main__":
