@@ -6,7 +6,7 @@ pkgrel=1
 epoch=
 pkgdesc="A utility to clean up old files and empty directories"
 arch=("any")
-url="https://github.com/mmacpherson/expirito"
+url="https://github.com/mmacpherson/${pkgname}"
 license=("MIT")
 depends=("python" "python-yaml")
 makedepends=("git")
@@ -17,20 +17,14 @@ backup=()
 options=()
 install=
 changelog=
-
 source=(
-  "https://github.com/mmacpherson/expirito.git"
+  "git+https://github.com/mmacpherson/${pkgname}.git"
 )
 sha256sums=("SKIP")
 
-build() {
-  cd "${srcdir}/expirito"
-
-  # Add any build steps if needed
-}
 
 package() {
-  cd "${srcdir}/expirito"
+  cd "${srcdir}/${pkgname}"
 
   install -Dm755 expirito.py "${pkgdir}/usr/bin/expirito"
   install -Dm644 expirito.service "${pkgdir}/usr/lib/systemd/user/expirito.service"
