@@ -12,12 +12,14 @@ import yaml
 logging.basicConfig(level=logging.INFO, format="%(asctime)s: %(message)s")
 
 
-def move_to_holding(file_path: Path, holding_directory: Path) -> Path:
+def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> Path:
     """Move the file to the holding directory, replicating the entire path.
 
     Args:
         file_path: The file path to be moved.
         holding_directory: The holding directory path.
+        dry_run: If True, print the action without actually moving the file.
+
     Returns:
         The destination path in the holding directory.
     """
@@ -30,9 +32,11 @@ def move_to_holding(file_path: Path, holding_directory: Path) -> Path:
     # Create the destination directory if it doesn't exist
     destination_directory = destination_path.parent
     if not destination_directory.exists():
-        destination_directory.mkdir(parents=True)
+        if not dry_run:
+            destination_directory.mkdir(parents=True)
 
-    shutil.move(str(file_path), str(destination_path))
+    if not dry_run:
+        shutil.move(str(file_path), str(destination_path))
 
     return destination_path
 
@@ -63,10 +67,9 @@ def clean_folder(
                 entry_path.is_dir() and not any(entry_path.iterdir())
             ):
                 if holding_directory:
-                    if not dry_run:
-                        destination_path = move_to_holding(
-                            entry_path, holding_directory
-                        )
+                    destination_path = move_to_holding(
+                        entry_path, holding_directory, dry_run
+                    )
                     action = f"Moved {entry_path} to {destination_path}"
                 else:
                     if not dry_run:
