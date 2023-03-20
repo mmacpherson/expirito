@@ -27,6 +27,6 @@ package() {
   cd "${srcdir}/${pkgname}"
 
   install -Dm755 expirito.py "${pkgdir}/usr/bin/expirito"
-  install -Dm644 expirito.service "${pkgdir}/usr/lib/systemd/user/expirito.service"
-  install -Dm644 expirito.timer "${pkgdir}/usr/lib/systemd/user/expirito.timer"
+  install -Dm644 systemd/expirito.service "${pkgdir}/usr/lib/systemd/user/expirito.service"
+  install -Dm644 systemd/expirito.timer "${pkgdir}/usr/lib/systemd/user/expirito.timer"
 }
