@@ -131,7 +131,7 @@ def clean_folder(
                 if entry_path.is_file() or entry_path.is_symlink():
                     entry_path.unlink()
                 else:
-                    entry_path.rmdir()
+                    shutil.rmtree(entry_path)
             action_log = f"Deleted {entry_path}"
         else:
             raise NotImplementedError(f"Unexpected action state [{action}].")
@@ -152,21 +152,17 @@ def read_config(config_path: Path) -> Dict[str, Any]:
         config = yaml.safe_load(f)
 
     # Light validation of config file.
-    all_config_dirs = [config["holding_directory"]] + [
-        d["path"] for d in config["directories"]
-    ]
-    for config_dir in all_config_dirs:
-        config_path = Path(config_dir)
-        if not config_path.exists():
-            logging.error(f"Configuration path [{config_path}] does not exist.")
-            sys.exit(1)
-        if not config_path.is_absolute():
-            logging.error(
-                f"Configuration path [{config_path}] is not an absolute path."
-            )
-            sys.exit(1)
-    for d in config["directories"]:
-        age_limit = d["age_limit"]
+    #
+    # Holding directory needs to be present.
+    if not Path(config["holding_directory"]).exists():
+        logging.error(f"Configuration path [{config_path}] does not exist.")
+        sys.exit(1)
+
+    # Check monitored directories.
+    for cd in config["directories"]:
+        if not Path(cd["path"]).exists():
+            logging.warn(f"Configuration path [{config_path}] does not exist.")
+        age_limit = cd["age_limit"]
         if not (isinstance(age_limit, int) and (age_limit > 0)):
             logging.error(f"Invalid age_limit [{age_limit}] provided.")
             sys.exit(1)
