@@ -6,7 +6,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 import yaml
 
@@ -87,7 +87,7 @@ def is_tree_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
 def clean_folder(
     folder_path: Path,
     days_old: int,
-    holding_directory: Optional[Path],
+    holding_directory: Path | None,
     dry_run: bool,
 ) -> None:
     """Clean up files and empty directories in the folder based on their age.
@@ -152,7 +152,7 @@ def setup_file_logging(log_file: str) -> None:
         logger.warning(f"Could not set up file logging: {e}")
 
 
-def read_config(config_path: Path) -> Dict[str, Any]:
+def read_config(config_path: Path) -> dict[str, Any]:
     """Read the configuration file.
 
     Args:
