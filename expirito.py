@@ -10,7 +10,12 @@ from typing import Any, Dict, Optional, cast
 
 import yaml
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s: %(message)s")
+# Configure logging - will be updated with file handler if specified in config
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter("%(asctime)s: %(message)s"))
+logger.addHandler(console_handler)
 
 
 def copy2_nofollow(*args):
@@ -37,9 +42,8 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
 
     # Create the destination directory if it doesn't exist
     destination_directory = destination_path.parent
-    if not destination_directory.exists():
-        if not dry_run:
-            destination_directory.mkdir(parents=True)
+    if not destination_directory.exists() and not dry_run:
+        destination_directory.mkdir(parents=True)
 
     if not dry_run:
         shutil.move(str(file_path), str(destination_path), copy_function=copy2_nofollow)
@@ -102,10 +106,7 @@ def clean_folder(
         if entry_path.is_symlink():
             target = entry_path.resolve(strict=False)
             if not target.exists():
-                if holding_directory:
-                    action = "move"
-                else:
-                    action = "delete"
+                action = "move" if holding_directory else "delete"
         else:
             if (
                 entry_path.is_file()
@@ -114,10 +115,7 @@ def clean_folder(
                 entry_path.is_dir()
                 and is_tree_old_enough(entry_path, days_old, current_time)
             ):
-                if holding_directory:
-                    action = "move"
-                else:
-                    action = "delete"
+                action = "move" if holding_directory else "delete"
 
         if action is None:
             continue
@@ -136,7 +134,22 @@ def clean_folder(
         else:
             raise NotImplementedError(f"Unexpected action state [{action}].")
 
-        logging.info(action_log)
+        logger.info(action_log)
+
+
+def setup_file_logging(log_file: str) -> None:
+    """Configure file logging if specified in config.
+
+    Args:
+        log_file: Path to the log file
+    """
+    try:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s: %(message)s"))
+        logger.addHandler(file_handler)
+        logger.info(f"Logging to file: {log_file}")
+    except Exception as e:
+        logger.warning(f"Could not set up file logging: {e}")
 
 
 def read_config(config_path: Path) -> Dict[str, Any]:
@@ -148,23 +161,25 @@ def read_config(config_path: Path) -> Dict[str, Any]:
     Returns:
         The configuration as a dictionary.
     """
-    with open(config_path, "rt") as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f)
 
     # Light validation of config file.
     #
     # Holding directory needs to be present.
     if not Path(config["holding_directory"]).exists():
-        logging.error(f"Configuration path [{config_path}] does not exist.")
+        logger.error(
+            f"Holding directory [{config['holding_directory']}] does not exist."
+        )
         sys.exit(1)
 
     # Check monitored directories.
     for cd in config["directories"]:
         if not Path(cd["path"]).exists():
-            logging.warn(f"Configuration path [{config_path}] does not exist.")
+            logger.warning(f"Monitored directory [{cd['path']}] does not exist.")
         age_limit = cd["age_limit"]
         if not (isinstance(age_limit, int) and (age_limit > 0)):
-            logging.error(f"Invalid age_limit [{age_limit}] provided.")
+            logger.error(f"Invalid age_limit [{age_limit}] provided.")
             sys.exit(1)
 
     return config
@@ -200,6 +215,10 @@ def main(config_path: Path, dry_run: bool) -> None:
     """
     config = read_config(config_path)
 
+    # Set up file logging if specified
+    if "log_file" in config:
+        setup_file_logging(config["log_file"])
+
     holding_directory = Path(config["holding_directory"])
     holding_age_limit = config["holding_age_limit"]
 
@@ -222,7 +241,7 @@ if __name__ == "__main__":
     default_config_path = Path.home() / ".config/expirito/config.yaml"
     config_path = Path(args.config_file) if args.config_file else default_config_path
     if not config_path.is_file():
-        logging.error(f"Configuration file not found at {config_path}")
+        logger.error(f"Configuration file not found at {config_path}")
         sys.exit(1)
 
     main(config_path, args.dry_run)

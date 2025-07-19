@@ -1,2 +1,30 @@
-[tool.isort]
-profile = "black"
+[tool.ruff]
+# Match black's default line length
+line-length = 88
+target-version = "py38"
+
+[tool.ruff.lint]
+# Enable common linting rules
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "SIM", # flake8-simplify
+]
+ignore = []
+
+[tool.ruff.lint.isort]
+# Match isort configuration
+known-first-party = ["expirito"]
+
+[tool.ruff.format]
+# Match black's formatting style
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false

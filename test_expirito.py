@@ -19,10 +19,12 @@ def test_move_to_holding(tmp_path):
 
     old_file = test_dir / "old.txt"
     create_test_file(old_file, 10)
-    expirito.move_to_holding(test_dir, holding, 5)
+
+    # move_to_holding takes (file_path, holding_directory, dry_run)
+    result_path = expirito.move_to_holding(old_file, holding, dry_run=False)
 
     assert not old_file.exists()
-    assert (holding / str(test_dir) / "old.txt").exists()
+    assert result_path.exists()
 
 
 def test_clean_folder(tmp_path):
@@ -33,15 +35,16 @@ def test_clean_folder(tmp_path):
 
     old_file = test_dir / "old.txt"
     create_test_file(old_file, 10)
+    new_file = test_dir / "new.txt"
+    create_test_file(new_file, 1)
 
-    config = {
-        "holding_directory": str(holding),
-        "holding_age_limit": 90,
-        "directories": [{"path": str(test_dir), "age_limit": 5}],
-        "log_file": "actions.log",
-    }
-
-    expirito.clean_folder(test_dir, config)
+    # clean_folder takes (folder_path, days_old, holding_directory, dry_run)
+    expirito.clean_folder(
+        test_dir, days_old=5, holding_directory=holding, dry_run=False
+    )
 
     assert not old_file.exists()
-    assert (holding / str(test_dir) / "old.txt").exists()
+    assert new_file.exists()  # Should not be moved (only 1 day old)
+    # Check that old file was moved to holding with preserved path structure
+    moved_file = holding / test_dir.relative_to(test_dir.anchor) / "old.txt"
+    assert moved_file.exists()
