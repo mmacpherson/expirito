@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import argparse
+import contextlib
 import logging
+import os
 import shutil
 import sys
 import time
@@ -16,6 +18,63 @@ logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter("%(asctime)s: %(message)s"))
 logger.addHandler(console_handler)
+
+
+def validate_path(path: Path, base_path: Path | None = None) -> bool:
+    """Validate that a path is safe from traversal attacks.
+
+    Args:
+        path: The path to validate
+        base_path: Optional base path that the path must be within
+
+    Returns:
+        True if the path is safe, False otherwise
+    """
+    try:
+        # Resolve to absolute path, following symlinks
+        resolved = path.resolve(strict=False)
+
+        # Check for path traversal attempts
+        if ".." in path.parts:
+            return False
+
+        # If base_path provided, ensure path is within it
+        if base_path:
+            base_resolved = base_path.resolve(strict=False)
+            try:
+                resolved.relative_to(base_resolved)
+            except ValueError:
+                # Path is outside base_path
+                return False
+
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def check_permissions(path: Path, mode: str) -> bool:
+    """Check if we have the required permissions for a path.
+
+    Args:
+        path: The path to check
+        mode: 'r' for read, 'w' for write, 'x' for execute
+
+    Returns:
+        True if we have the required permissions
+    """
+    try:
+        if mode == "r":
+            return os.access(path, os.R_OK)
+        elif mode == "w":
+            # For write, check parent directory if path doesn't exist
+            check_path = path if path.exists() else path.parent
+            return os.access(check_path, os.W_OK)
+        elif mode == "x":
+            return os.access(path, os.X_OK)
+        else:
+            return False
+    except OSError:
+        return False
 
 
 def copy2_nofollow(*args):
@@ -34,6 +93,19 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
     Returns:
         The destination path in the holding directory.
     """
+    # Security checks
+    if not validate_path(file_path):
+        raise ValueError(f"Invalid source path: {file_path}")
+    if not validate_path(holding_directory):
+        raise ValueError(f"Invalid holding directory: {holding_directory}")
+
+    # Check permissions
+    if not dry_run:
+        if not check_permissions(file_path, "r"):
+            raise PermissionError(f"No read permission for: {file_path}")
+        if not check_permissions(holding_directory, "w"):
+            raise PermissionError(f"No write permission for: {holding_directory}")
+
     # Create a relative path for the file by removing the root
     relative_path = file_path.relative_to(file_path.anchor)
 
@@ -46,7 +118,18 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
         destination_directory.mkdir(parents=True)
 
     if not dry_run:
-        shutil.move(str(file_path), str(destination_path), copy_function=copy2_nofollow)
+        try:
+            shutil.move(
+                str(file_path), str(destination_path), copy_function=copy2_nofollow
+            )
+        except (OSError, PermissionError):
+            # Clean up any partially created directories
+            if destination_directory.exists() and not any(
+                destination_directory.iterdir()
+            ):
+                with contextlib.suppress(OSError):
+                    destination_directory.rmdir()
+            raise
 
     return destination_path
 
@@ -100,6 +183,16 @@ def clean_folder(
                            empty directories are moved here instead of being deleted.
         dry_run: If True, print the actions without actually making changes.
     """
+    # Security check: validate folder_path
+    if not validate_path(folder_path):
+        logger.error(f"Invalid path: {folder_path}")
+        return
+
+    # Check read permissions
+    if not check_permissions(folder_path, "r"):
+        logger.error(f"No read permission for: {folder_path}")
+        return
+
     current_time = time.time()
     for entry_path in folder_path.iterdir():
         action = None
@@ -120,16 +213,29 @@ def clean_folder(
         if action is None:
             continue
         elif action == "move":
-            destination_path = move_to_holding(
-                entry_path, cast(Path, holding_directory), dry_run
-            )
-            action_log = f"Moved {entry_path} to {destination_path}"
+            try:
+                destination_path = move_to_holding(
+                    entry_path, cast(Path, holding_directory), dry_run
+                )
+                action_log = f"Moved {entry_path} to {destination_path}"
+            except (OSError, PermissionError, ValueError) as e:
+                logger.error(f"Failed to move {entry_path}: {e}")
+                continue
         elif action == "delete":
             if not dry_run:
-                if entry_path.is_file() or entry_path.is_symlink():
-                    entry_path.unlink()
-                else:
-                    shutil.rmtree(entry_path)
+                try:
+                    # Check permissions right before deletion
+                    if not check_permissions(entry_path, "w"):
+                        logger.error(f"No write permission for: {entry_path}")
+                        continue
+
+                    if entry_path.is_file() or entry_path.is_symlink():
+                        entry_path.unlink()
+                    else:
+                        shutil.rmtree(entry_path)
+                except (OSError, PermissionError) as e:
+                    logger.error(f"Failed to delete {entry_path}: {e}")
+                    continue
             action_log = f"Deleted {entry_path}"
         else:
             raise NotImplementedError(f"Unexpected action state [{action}].")
@@ -164,22 +270,73 @@ def read_config(config_path: Path) -> dict[str, Any]:
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
-    # Light validation of config file.
-    #
-    # Holding directory needs to be present.
-    if not Path(config["holding_directory"]).exists():
+    # Validate required fields
+    required_fields = ["holding_directory", "holding_age_limit", "directories"]
+    for field in required_fields:
+        if field not in config:
+            logger.error(f"Missing required field in config: {field}")
+            sys.exit(1)
+
+    # Validate and sanitize holding directory
+    holding_dir = Path(config["holding_directory"])
+    if not validate_path(holding_dir):
+        logger.error(f"Invalid holding directory path: {holding_dir}")
+        sys.exit(1)
+
+    if not holding_dir.exists():
+        logger.error(f"Holding directory [{holding_dir}] does not exist.")
+        sys.exit(1)
+
+    # Validate holding_age_limit
+    holding_age = config["holding_age_limit"]
+    if (
+        not isinstance(holding_age, int) or holding_age <= 0 or holding_age > 36500
+    ):  # Max 100 years
         logger.error(
-            f"Holding directory [{config['holding_directory']}] does not exist."
+            f"Invalid holding_age_limit [{holding_age}]. Must be 1-36500 days."
         )
         sys.exit(1)
 
-    # Check monitored directories.
-    for cd in config["directories"]:
-        if not Path(cd["path"]).exists():
-            logger.warning(f"Monitored directory [{cd['path']}] does not exist.")
+    # Validate monitored directories
+    if not isinstance(config["directories"], list):
+        logger.error("'directories' must be a list")
+        sys.exit(1)
+
+    for i, cd in enumerate(config["directories"]):
+        if not isinstance(cd, dict):
+            logger.error(f"Directory entry {i} is not a dictionary")
+            sys.exit(1)
+
+        if "path" not in cd or "age_limit" not in cd:
+            logger.error(f"Directory entry {i} missing required fields")
+            sys.exit(1)
+
+        # Validate path
+        dir_path = Path(cd["path"])
+        if not validate_path(dir_path):
+            logger.error(f"Invalid directory path at index {i}: {dir_path}")
+            sys.exit(1)
+
+        # Ensure monitored directory is not inside holding directory
+        try:
+            dir_path.resolve().relative_to(holding_dir.resolve())
+            logger.error(
+                f"Monitored directory cannot be inside holding directory: {dir_path}"
+            )
+            sys.exit(1)
+        except ValueError:
+            # Good - path is not inside holding directory
+            pass
+
+        if not dir_path.exists():
+            logger.warning(f"Monitored directory [{dir_path}] does not exist.")
+
+        # Validate age_limit
         age_limit = cd["age_limit"]
-        if not (isinstance(age_limit, int) and (age_limit > 0)):
-            logger.error(f"Invalid age_limit [{age_limit}] provided.")
+        if not isinstance(age_limit, int) or age_limit <= 0 or age_limit > 36500:
+            logger.error(
+                f"Invalid age_limit [{age_limit}] at index {i}. Must be 1-36500 days."
+            )
             sys.exit(1)
 
     return config
