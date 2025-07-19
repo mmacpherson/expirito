@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+__version__ = "1.1.0"
+
 import argparse
 import contextlib
 import logging
@@ -349,7 +351,10 @@ def parse_arguments() -> argparse.Namespace:
         An argparse.Namespace object containing the command-line arguments.
     """
     parser = argparse.ArgumentParser(
-        description="Clean up old files in specified directories."
+        description="Clean up old files in specified directories.", prog="expirito"
+    )
+    parser.add_argument(
+        "-v", "--version", action="version", version=f"%(prog)s {__version__}"
     )
     parser.add_argument(
         "-c", "--config-file", type=str, help="Path to the custom configuration file."

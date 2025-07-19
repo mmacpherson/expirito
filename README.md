@@ -1,8 +1,8 @@
 # Expirito
 
-Expirito is a utility tool for cleaning up old files and empty directories based on their age. It moves files and directories from specified paths to a holding directory and eventually deletes them after a defined period.
-
-This project is a collaboration between [Your Name] and ChatGPT with GPT-4 by OpenAI.
+Expirito is a utility tool for cleaning up old files and empty directories based
+on their age. It moves files and directories from specified paths to a holding
+directory and eventually deletes them after a defined period.
 
 ## Installation
 
