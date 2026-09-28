@@ -147,7 +147,8 @@ def is_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
     Returns:
         True if the entry is older than the age limit, False otherwise.
     """
-    age_in_seconds = current_time - path.stat().st_mtime
+    # lstat: date a symlink by the link itself; a dangling target must not raise.
+    age_in_seconds = current_time - path.lstat().st_mtime
     age_in_days = age_in_seconds / (60 * 60 * 24)
     return age_in_days > age_limit
 

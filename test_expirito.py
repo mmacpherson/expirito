@@ -48,3 +48,19 @@ def test_clean_folder(tmp_path):
     # Check that old file was moved to holding with preserved path structure
     moved_file = holding / test_dir.relative_to(test_dir.anchor) / "old.txt"
     assert moved_file.exists()
+
+
+def test_tree_with_dangling_symlink(tmp_path):
+    # A broken link nested in a tree (e.g. docs/tutorials -> ../tutorials/)
+    # must be dated by the link itself, not crash following it.
+    tree = tmp_path / "project"
+    (tree / "docs").mkdir(parents=True)
+    create_test_file(tree / "docs" / "old.txt", 10)
+    link = tree / "docs" / "tutorials"
+    link.symlink_to("../tutorials/")
+    old = (datetime.now() - timedelta(days=10)).timestamp()
+    os.utime(link, (old, old), follow_symlinks=False)
+    for d in (tree / "docs", tree):
+        os.utime(d, (old, old))
+
+    assert expirito.is_tree_old_enough(tree, 7, datetime.now().timestamp())
