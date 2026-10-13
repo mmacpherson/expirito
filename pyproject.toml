@@ -5,7 +5,7 @@ description = "A utility to clean up old files and empty directories"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = ["pyyaml"]
+dependencies = ["pyyaml", "pathspec>=0.10"]
 
 [project.urls]
 Homepage = "https://github.com/mmacpherson/expirito"

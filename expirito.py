@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import argparse
 import contextlib
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pathspec import GitIgnoreSpec
 
 # Configure logging - will be updated with file handler if specified in config
 logger = logging.getLogger(__name__)
@@ -309,6 +310,33 @@ def contains_mount(entry_path: Path, mounts: set[str]) -> bool:
     return any(m == entry or m.startswith(entry + "/") for m in mounts)
 
 
+def is_ignored(entry_path: Path, root: Path, spec: GitIgnoreSpec) -> bool:
+    """Whether a top-level entry matches an ignore pattern or holds something that
+    does: moving a folder moves everything in it, so a folder holding an ignored
+    file is kept whole. Paths are matched relative to the watched directory, with
+    a trailing slash on folders, as gitignore does.
+    """
+
+    def matches(path: Path, is_dir: bool) -> bool:
+        relative = path.relative_to(root).as_posix() + ("/" if is_dir else "")
+        return spec.match_file(relative)
+
+    is_dir = entry_path.is_dir() and not entry_path.is_symlink()
+    if matches(entry_path, is_dir):
+        return True
+    if not is_dir:
+        return False
+    for dirpath, dirnames, filenames in os.walk(entry_path):
+        here = Path(dirpath)
+        for name in dirnames:
+            if matches(here / name, not (here / name).is_symlink()):
+                return True
+        for name in filenames:
+            if matches(here / name, False):
+                return True
+    return False
+
+
 class UninspectableError(Exception):
     """Part of an entry could not be inspected, so its age is unknown."""
 
@@ -349,6 +377,7 @@ def clean_folder(
     holding_directory: Path | None,
     dry_run: bool,
     current_time: float | None = None,
+    ignore: list[str] | None = None,
 ) -> int:
     """Clean up files and empty directories in the folder based on their age.
 
@@ -364,6 +393,8 @@ def clean_folder(
                            empty directories are moved here instead of being deleted.
         dry_run: If True, print the actions without actually making changes.
         current_time: Seconds since the epoch to age entries against; now if None.
+        ignore: gitignore-style patterns, relative to FOLDER_PATH, for entries
+            that must never be moved or deleted.
 
     Returns:
         The number of entries that could not be moved or deleted.
@@ -382,6 +413,7 @@ def clean_folder(
         return 1
     failures = 0
     planned: set[Path] = set()  # dry run: destinations already promised
+    spec = GitIgnoreSpec.from_lines(ignore) if ignore else None
     for entry_path in entries:
         if contains_holding(entry_path, holding_directory):
             continue
@@ -390,6 +422,9 @@ def clean_folder(
                 logger.warning(f"Keeping {entry_path}: it is or contains a mount point")
                 continue
             if not expired(entry_path, days_old, current_time):
+                continue
+            if spec and is_ignored(entry_path, folder_path, spec):
+                logger.info(f"Keeping {entry_path}: it matches an ignore pattern")
                 continue
             if dry_run:
                 if holding_directory:
@@ -564,6 +599,13 @@ def read_config(config_path: Path) -> dict[str, Any]:
         if not dir_path.exists():
             logger.warning(f"Monitored directory [{dir_path}] does not exist.")
 
+        ignore = cd.get("ignore", [])
+        if not isinstance(ignore, list) or not all(isinstance(p, str) for p in ignore):
+            logger.error(
+                f"'ignore' at index {i} must be a list of gitignore-style patterns"
+            )
+            sys.exit(1)
+
         # Validate age_limit
         age_limit = cd["age_limit"]
         if not isinstance(age_limit, int) or age_limit <= 0 or age_limit > 36500:
@@ -661,7 +703,13 @@ def clean_all(
         days_old = directory["age_limit"]
 
         # Move to holding pass.
-        failures += clean_folder(folder_path, days_old, holding_directory, dry_run)
+        failures += clean_folder(
+            folder_path,
+            days_old,
+            holding_directory,
+            dry_run,
+            ignore=directory.get("ignore"),
+        )
 
         # Delete from holding pass.
         try:
@@ -677,12 +725,21 @@ def clean_all(
     return failures
 
 
+def default_config_path() -> Path:
+    """$XDG_CONFIG_HOME/expirito/config.yaml, or ~/.config/... when it is unset.
+
+    The XDG spec says a relative XDG_CONFIG_HOME is invalid and to be ignored.
+    """
+    base = os.environ.get("XDG_CONFIG_HOME", "")
+    config_home = Path(base) if os.path.isabs(base) else Path.home() / ".config"
+    return config_home / "expirito" / "config.yaml"
+
+
 def cli() -> None:
     """Command-line entry point."""
     args = parse_arguments()
 
-    default_config_path = Path.home() / ".config/expirito/config.yaml"
-    config_path = Path(args.config_file) if args.config_file else default_config_path
+    config_path = Path(args.config_file) if args.config_file else default_config_path()
     if not config_path.is_file():
         logger.error(f"Configuration file not found at {config_path}")
         sys.exit(1)

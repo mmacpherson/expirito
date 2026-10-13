@@ -86,15 +86,22 @@ directories:
     age_limit: 5
   - path: /path/to/directory2
     age_limit: 30
+    ignore:          # optional, gitignore syntax, relative to this directory
+      - AGENTS.md
+      - "*.ckpt"
 log_file: actions.log
 ```
 
 - `holding_directory`: The path to the holding directory where files and empty directories will be moved.
 - `holding_age_limit`: The number of days after which files and directories in the holding directory will be deleted.
 - `directories`: A list of directories to monitor and clean up, each with a specified `path` and `age_limit`.
+- `ignore` (optional, per directory): gitignore-style patterns for entries
+  expirito must never move or delete, matched relative to that directory. A
+  folder holding a match is kept whole, since moving it would move the match.
 - `log_file`: The path to the log file where Expirito will log its actions.
 
-Place the `config.yaml` file in the `~/.config/expirito` directory (or another suitable location).
+Without `-c`, expirito reads `$XDG_CONFIG_HOME/expirito/config.yaml`
+(`~/.config/expirito/config.yaml` when `XDG_CONFIG_HOME` is unset).
 
 ## Systemd Timer
 

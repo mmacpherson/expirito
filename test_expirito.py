@@ -614,7 +614,6 @@ def test_f1_holding_folders_made_under_a_group_umask_pass_the_checks(tmp_path):
 # --- 1.3.0: per-directory ignore patterns (gitignore syntax) and XDG config. ---
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.0: ignore patterns are not supported")
 def test_an_ignored_entry_is_never_moved(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "AGENTS.md").write_text("notes for agents")
@@ -628,7 +627,6 @@ def test_an_ignored_entry_is_never_moved(tmp_path):
     assert not (scratch / "old.txt").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.0: ignore patterns are not supported")
 def test_a_folder_holding_an_ignored_file_is_kept_whole(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "job").mkdir()
@@ -643,7 +641,6 @@ def test_a_folder_holding_an_ignored_file_is_kept_whole(tmp_path):
     assert (scratch / "job" / "best.ckpt").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.0: ignore patterns are not supported")
 def test_a_directory_pattern_protects_a_folder(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "keep").mkdir()
@@ -658,7 +655,6 @@ def test_a_directory_pattern_protects_a_folder(tmp_path):
     assert not (scratch / "keepsake").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.0: ignore patterns are not supported")
 def test_ignore_patterns_come_from_the_config(tmp_path, monkeypatch):
     import yaml
 
@@ -682,7 +678,6 @@ def test_ignore_patterns_come_from_the_config(tmp_path, monkeypatch):
     assert (scratch / "AGENTS.md").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.0: ignore patterns are not validated")
 def test_ignore_must_be_a_list_of_strings(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     config = write_config(tmp_path / "c.yaml", holding, scratch)
@@ -695,7 +690,6 @@ def test_ignore_must_be_a_list_of_strings(tmp_path):
         expirito.read_config(config)
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.0: the default config ignores XDG")
 def test_the_default_config_follows_xdg_config_home(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     assert (
