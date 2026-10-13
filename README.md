@@ -17,24 +17,36 @@ directory and eventually deletes them after a defined period.
   touched. A dangling link is not removed early (its target may just be on an
   unmounted disk).
 - The holding directory may live inside a monitored directory (for example
-  `/mnt/scratch/.expired`); it is skipped, never moved into itself. It must be a
-  real folder, not a symlink, and expirito refuses any symlink inside it.
-- Nothing is overwritten in holding: if a name is taken there, the newcomer
-  becomes `NAME.1`, `NAME.2`, and so on.
+  `/mnt/scratch/.expired`); it is skipped, never moved into itself.
+- The holding directory belongs to expirito alone. It must be a real folder
+  (not a symlink), owned by the user running expirito and writable by no one
+  else, or expirito refuses to start. Its path components must not be symlinks
+  or mount points; entries held there that happen to be symlinks are fine.
+  Don't work in holding: a quarantined entry is waiting to be deleted.
+- Nothing in holding is replaced: a taken name gives `NAME.1`, `NAME.2`, and so
+  on. On Linux the move is one atomic no-replace rename (`renameat2`), so this
+  holds even if a name is taken at the last moment; elsewhere it is a check
+  followed by a rename.
 - Moves are plain renames on one filesystem, never copy-then-delete. An entry
-  that is or contains a mount point, or that cannot be fully read, is left
-  alone and logged.
+  that is or contains a mount point is left alone and logged; on Linux, a mount
+  table that cannot be read stops the run.
 - Each entry is checked again just before it is moved or deleted, and only one
-  run (holding a lock in the holding directory) acts at a time. A job that is
-  still writing into a folder it has not touched for the whole age limit can
-  race that last step; the holding period is the safety margin for that.
-- A run that leaves anything undone exits 1; `--dry-run` changes nothing and
-  writes no log.
+  run (holding a lock in the holding directory) acts at a time. Even so, a
+  process still writing into an entry at that moment can race the final step.
+  For the move into holding the holding period is the safety margin; the purge
+  of an entry from holding deletes it for good, including anything written into
+  it during the purge.
+- A run that leaves anything undone exits 1: a failed move or deletion, or an
+  entry that could not be fully read (it is kept). Entries kept because they
+  contain a mount point are a deliberate skip, logged without failing the run.
+  `--dry-run` changes nothing, writes no log, and plans the same destinations
+  a real run would choose; it cannot predict errors the real run will meet.
 
 ## Installation
 
 - Arch Linux: `paru -S expirito` (AUR), or build the PKGBUILD here.
-- Anywhere with Python 3.10+: `uv tool install git+https://github.com/mmacpherson/expirito`
+- Linux or another POSIX system with Python 3.10+:
+  `uv tool install git+https://github.com/mmacpherson/expirito`
 
 Then place a `config.yaml` (see below), by default at
 `~/.config/expirito/config.yaml`, and either install the systemd timer
