@@ -442,7 +442,6 @@ def test_s5_a_destination_created_late_is_never_replaced(tmp_path, monkeypatch):
     assert "expiring now" in contents or (scratch / "report").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="second pass 6: an uninspectable tree exits 0")
 def test_s6_an_uninspectable_tree_makes_the_run_fail(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     hidden = scratch / "job" / "private"
@@ -459,9 +458,6 @@ def test_s6_an_uninspectable_tree_makes_the_run_fail(tmp_path, monkeypatch):
     assert failures
 
 
-@pytest.mark.xfail(
-    strict=True, reason="second pass 6: ENOENT from the destination is swallowed"
-)
 def test_s6_a_rename_failing_on_its_destination_is_a_failure(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "old.txt").write_text("expiring")

@@ -281,19 +281,25 @@ def contains_mount(entry_path: Path, mounts: set[str]) -> bool:
     return any(m == entry or m.startswith(entry + "/") for m in mounts)
 
 
+class UninspectableError(Exception):
+    """Part of an entry could not be inspected, so its age is unknown."""
+
+
 def expired(entry_path: Path, age_limit: int, current_time: float) -> bool:
     """Whether a top-level entry has expired: a file or link by its own age, a
-    folder only when its whole tree is older than the limit."""
+    folder only when its whole tree is older than the limit.
+
+    Raises:
+        UninspectableError: Part of a folder's tree could not be read; the entry must
+            be kept, and the run should report it rather than call it recent.
+    """
     # A symlink to a folder is still just a link: date and remove the link.
     if entry_path.is_symlink() or not entry_path.is_dir():
         return is_old_enough(entry_path, age_limit, current_time)
     try:
         return is_tree_old_enough(entry_path, age_limit, current_time)
     except OSError as e:
-        logger.warning(
-            f"Keeping {entry_path}: cannot inspect {e.filename}: {e.strerror}"
-        )
-        return False
+        raise UninspectableError(f"cannot inspect {e.filename}: {e.strerror}") from e
 
 
 def contains_holding(entry_path: Path, holding_directory: Path | None) -> bool:
@@ -376,8 +382,15 @@ def clean_folder(
             else:
                 delete_entry(entry_path)
                 logger.info(f"Deleted {entry_path}")
-        except FileNotFoundError:
-            continue  # gone since the listing: nothing left to do
+        except UninspectableError as e:
+            logger.error(f"Keeping {entry_path}: {e}")
+            failures += 1
+        except FileNotFoundError as e:
+            if not os.path.lexists(entry_path):
+                continue  # gone since the listing: nothing left to do
+            verb = "move" if holding_directory else "delete"
+            logger.error(f"Failed to {verb} {entry_path}: {e}")
+            failures += 1
         except (OSError, ValueError) as e:
             verb = "move" if holding_directory else "delete"
             logger.error(f"Failed to {verb} {entry_path}: {e}")
