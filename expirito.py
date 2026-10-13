@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import argparse
 import contextlib
@@ -136,6 +136,19 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
     return destination_path
 
 
+def last_touched(path: Path) -> float:
+    """When an entry last changed: its content, or its arrival where it is now.
+
+    mtime alone misdates two cases: cp -a and rsync -a keep an old mtime on
+    data that just arrived, and moving an entry into the holding directory keeps
+    its old mtime, which would let the holding pass delete it at once. The
+    inode's ctime records both the arrival and the move.
+    lstat dates a symlink by the link itself; a dangling target must not raise.
+    """
+    st = path.lstat()
+    return max(st.st_mtime, st.st_ctime)
+
+
 def is_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
     """Check if a file or directory is older than the specified age limit.
 
@@ -147,8 +160,7 @@ def is_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
     Returns:
         True if the entry is older than the age limit, False otherwise.
     """
-    # lstat: date a symlink by the link itself; a dangling target must not raise.
-    age_in_seconds = current_time - path.lstat().st_mtime
+    age_in_seconds = current_time - last_touched(path)
     age_in_days = age_in_seconds / (60 * 60 * 24)
     return age_in_days > age_limit
 
@@ -170,13 +182,31 @@ def is_tree_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
     )
 
 
+def contains_holding(entry_path: Path, holding_directory: Path | None) -> bool:
+    """Whether ENTRY_PATH is the holding directory or a folder containing it.
+
+    The holding directory may live inside a monitored folder (e.g.
+    /mnt/scratch/.expired); it must never be moved into itself.
+    """
+    if holding_directory is None or entry_path.is_symlink():
+        return False
+    holding = holding_directory.resolve()
+    entry = entry_path.resolve()
+    return holding == entry or holding.is_relative_to(entry)
+
+
 def clean_folder(
     folder_path: Path,
     days_old: int,
     holding_directory: Path | None,
     dry_run: bool,
+    current_time: float | None = None,
 ) -> None:
     """Clean up files and empty directories in the folder based on their age.
+
+    Each top-level entry expires as a unit: a folder goes only when nothing in
+    its whole tree has been touched within the age limit. Symlinks are dated by
+    the link itself and removed as links; their targets are never touched.
 
     Args:
         folder_path: The folder path to be cleaned.
@@ -185,6 +215,7 @@ def clean_folder(
         holding_directory: The holding directory path. If not None, files and
                            empty directories are moved here instead of being deleted.
         dry_run: If True, print the actions without actually making changes.
+        current_time: Seconds since the epoch to age entries against; now if None.
     """
     # Security check: validate folder_path
     if not validate_path(folder_path):
@@ -196,22 +227,19 @@ def clean_folder(
         logger.error(f"No read permission for: {folder_path}")
         return
 
-    current_time = time.time()
+    if current_time is None:
+        current_time = time.time()
     for entry_path in folder_path.iterdir():
         action = None
-        if entry_path.is_symlink():
-            target = entry_path.resolve(strict=False)
-            if not target.exists():
-                action = "move" if holding_directory else "delete"
+        if contains_holding(entry_path, holding_directory):
+            continue
+        # A symlink to a folder is still just a link: date and remove the link.
+        if entry_path.is_symlink() or not entry_path.is_dir():
+            expired = is_old_enough(entry_path, days_old, current_time)
         else:
-            if (
-                entry_path.is_file()
-                and is_old_enough(entry_path, days_old, current_time)
-            ) or (
-                entry_path.is_dir()
-                and is_tree_old_enough(entry_path, days_old, current_time)
-            ):
-                action = "move" if holding_directory else "delete"
+            expired = is_tree_old_enough(entry_path, days_old, current_time)
+        if expired:
+            action = "move" if holding_directory else "delete"
 
         if action is None:
             continue
@@ -398,7 +426,8 @@ def main(config_path: Path, dry_run: bool) -> None:
             clean_folder(deletion_path, holding_age_limit, None, dry_run)
 
 
-if __name__ == "__main__":
+def cli() -> None:
+    """Command-line entry point."""
     args = parse_arguments()
 
     default_config_path = Path.home() / ".config/expirito/config.yaml"
@@ -408,3 +437,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     main(config_path, args.dry_run)
+
+
+if __name__ == "__main__":
+    cli()

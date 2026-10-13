@@ -4,11 +4,30 @@ Expirito is a utility tool for cleaning up old files and empty directories based
 on their age. It moves files and directories from specified paths to a holding
 directory and eventually deletes them after a defined period.
 
+## How entries expire
+
+- Each entry at the top of a monitored directory expires as a unit. A file goes
+  when it is past the age limit; a folder goes only when nothing anywhere in its
+  tree has been touched within the limit, so a job folder is never picked apart.
+- An entry's age runs from its last change: the later of its modification time
+  and its inode change time. Data copied in with `cp -a` or `rsync -a` keeps its
+  old modification time but is dated by its arrival, and moving an entry into
+  the holding directory restarts its clock, so the holding period is honoured.
+- Symlinks are dated by the link itself and removed as links; targets are never
+  touched. A dangling link is not removed early (its target may just be on an
+  unmounted disk).
+- The holding directory may live inside a monitored directory (for example
+  `/mnt/scratch/.expired`); it is skipped, never moved into itself.
+
 ## Installation
 
-1. Install the Expirito package using the provided PKGBUILD file.
-2. Place the `config.yaml` file in a suitable location, such as `~/.config/expirito/config.yaml`.
-3. Install the systemd timer by following the instructions in the [Systemd Timer](#systemd-timer) section.
+- Arch Linux: `paru -S expirito` (AUR), or build the PKGBUILD here.
+- Anywhere with Python 3.10+: `uv tool install git+https://github.com/mmacpherson/expirito`
+
+Then place a `config.yaml` (see below), by default at
+`~/.config/expirito/config.yaml`, and either install the systemd timer
+([Systemd Timer](#systemd-timer)) or run `expirito -c CONFIG` from your own
+scheduler. `expirito --dry-run` shows what would happen without changing anything.
 
 ## Configuration
 

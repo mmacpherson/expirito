@@ -1,7 +1,7 @@
 # Maintainer: Mike Macpherson <mmacpherson@noreply.github.io>
 
 pkgname=expirito
-pkgver=1.1.0
+pkgver=1.2.0
 pkgrel=1
 epoch=
 pkgdesc="A utility to clean up old files and empty directories"
@@ -18,7 +18,7 @@ options=()
 install=
 changelog=
 source=(
-  "git+https://github.com/mmacpherson/${pkgname}.git"
+  "git+https://github.com/mmacpherson/${pkgname}.git#tag=v${pkgver}"
 )
 sha256sums=("SKIP")
 

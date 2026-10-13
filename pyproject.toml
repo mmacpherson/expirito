@@ -1,7 +1,35 @@
+[project]
+name = "expirito"
+dynamic = ["version"]
+description = "A utility to clean up old files and empty directories"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["pyyaml"]
+
+[project.urls]
+Homepage = "https://github.com/mmacpherson/expirito"
+
+[project.scripts]
+expirito = "expirito:cli"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["expirito"]
+
+[tool.setuptools.dynamic]
+version = { attr = "expirito.__version__" }
+
+[dependency-groups]
+dev = ["pytest"]
+
 [tool.ruff]
 # Match black's default line length
 line-length = 88
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 # Enable common linting rules
