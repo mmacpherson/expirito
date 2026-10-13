@@ -247,27 +247,27 @@ def test_3_an_entry_containing_a_mount_point_is_left_alone(tmp_path, monkeypatch
     assert (scratch / "job" / "mnt" / "data").exists()
 
 
-@pytest.mark.xfail(
-    strict=True, reason="review finding 4: eligibility is not rechecked before acting"
-)
 def test_4_a_file_written_after_the_scan_is_not_deleted(tmp_path, monkeypatch):
     held = tmp_path / "held"
     (held / "job").mkdir(parents=True)
     (held / "job" / "old").write_text("old")
     scanned = expirito.is_tree_old_enough
+    now = time.time() + 15 * DAY  # the run's clock
 
     def scan_then_write(path, *args):
         result = scanned(path, *args)
-        (path / "fresh").write_text("written after the scan")
+        fresh = path / "fresh"
+        if not fresh.exists():  # a writer lands between the scan and the action
+            fresh.write_text("written after the scan")
+            os.utime(fresh, (now, now))
         return result
 
     monkeypatch.setattr(expirito, "is_tree_old_enough", scan_then_write)
-    expirito.clean_folder(held, 14, None, False, time.time() + 15 * DAY)
+    expirito.clean_folder(held, 14, None, False, now)
 
     assert (held / "job" / "fresh").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="review finding 4: runs are not serialized")
 def test_4_concurrent_runs_are_refused(tmp_path, monkeypatch):
     import fcntl
 

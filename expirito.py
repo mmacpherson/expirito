@@ -5,6 +5,7 @@ __version__ = "1.2.0"
 import argparse
 import contextlib
 import errno
+import fcntl
 import logging
 import os
 import re
@@ -237,7 +238,7 @@ def mount_points() -> set[str]:
         lines = Path("/proc/self/mountinfo").read_text().splitlines()
     except OSError:
         return set()
-    # The fifth field is the mount point, with spaces and such escaped as \\ooo.
+    # The fifth field is the mount point, with spaces and such escaped as \ooo (octal).
     return {
         re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), line.split()[4])
         for line in lines
@@ -248,6 +249,15 @@ def contains_mount(entry_path: Path, mounts: set[str]) -> bool:
     """Whether ENTRY_PATH is a mount point or has one anywhere beneath it."""
     entry = os.fspath(entry_path.resolve())
     return any(m == entry or m.startswith(entry + "/") for m in mounts)
+
+
+def expired(entry_path: Path, age_limit: int, current_time: float) -> bool:
+    """Whether a top-level entry has expired: a file or link by its own age, a
+    folder only when its whole tree is older than the limit."""
+    # A symlink to a folder is still just a link: date and remove the link.
+    if entry_path.is_symlink() or not entry_path.is_dir():
+        return is_old_enough(entry_path, age_limit, current_time)
+    return is_tree_old_enough(entry_path, age_limit, current_time)
 
 
 def contains_holding(entry_path: Path, holding_directory: Path | None) -> bool:
@@ -305,15 +315,15 @@ def clean_folder(
         if not entry_path.is_symlink() and contains_mount(entry_path, mounts):
             logger.warning(f"Keeping {entry_path}: it is or contains a mount point")
             continue
-        # A symlink to a folder is still just a link: date and remove the link.
-        if entry_path.is_symlink() or not entry_path.is_dir():
-            expired = is_old_enough(entry_path, days_old, current_time)
-        else:
-            expired = is_tree_old_enough(entry_path, days_old, current_time)
-        if expired:
+        if expired(entry_path, days_old, current_time):
             action = "move" if holding_directory else "delete"
 
         if action is None:
+            continue
+        # Something may have written into the entry since the scan; look again
+        # right before acting so the window for that is as small as it can be.
+        if not dry_run and not expired(entry_path, days_old, current_time):
+            logger.info(f"Keeping {entry_path}: it changed since the scan")
             continue
         elif action == "move":
             try:
@@ -475,12 +485,18 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main(config_path: Path, dry_run: bool) -> None:
+LOCK_NAME = ".expirito.lock"
+
+
+def main(config_path: Path, dry_run: bool) -> int:
     """Main function to clean up files based on the configuration.
 
     Args:
         config_path: The path to the configuration file.
         dry_run: If True, print the actions without actually making changes.
+
+    Returns:
+        The number of failures; nonzero means something was left undone.
     """
     config = read_config(config_path)
 
@@ -491,6 +507,33 @@ def main(config_path: Path, dry_run: bool) -> None:
     holding_directory = Path(config["holding_directory"])
     holding_age_limit = config["holding_age_limit"]
 
+    # One run at a time: two runs could pick the same free name in holding or
+    # act on each other's half-finished moves. A dry run changes nothing and
+    # needs no lock.
+    lock = None
+    if not dry_run:
+        lock = open(holding_directory / LOCK_NAME, "a")  # noqa: SIM115
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock.close()
+            logger.error(f"Another expirito run holds {holding_directory / LOCK_NAME}")
+            return 1
+    try:
+        clean_all(config, holding_directory, holding_age_limit, dry_run)
+    finally:
+        if lock:
+            lock.close()
+    return 0
+
+
+def clean_all(
+    config: dict[str, Any],
+    holding_directory: Path,
+    holding_age_limit: int,
+    dry_run: bool,
+) -> None:
+    """Expire each monitored directory into holding, then purge its holding."""
     for directory in config["directories"]:
         folder_path = Path(directory["path"])
         days_old = directory["age_limit"]
