@@ -4,9 +4,11 @@ __version__ = "1.2.0"
 
 import argparse
 import contextlib
+import errno
 import logging
 import os
 import shutil
+import stat
 import sys
 import time
 from pathlib import Path
@@ -108,16 +110,12 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
         if not check_permissions(holding_directory, "w"):
             raise PermissionError(f"No write permission for: {holding_directory}")
 
-    # Create a relative path for the file by removing the root
-    relative_path = file_path.relative_to(file_path.anchor)
-
-    # Create the destination path in the holding directory
-    destination_path = holding_directory / relative_path
-
-    # Create the destination directory if it doesn't exist
-    destination_directory = destination_path.parent
-    if not destination_directory.exists() and not dry_run:
-        destination_directory.mkdir(parents=True)
+    # The entry keeps its full original path below the holding directory.
+    source = file_path.absolute()
+    destination_directory = holding_subdir(
+        holding_directory, source.parent.parts[1:], create=not dry_run
+    )
+    destination_path = destination_directory / source.name
 
     if not dry_run:
         try:
@@ -134,6 +132,42 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
             raise
 
     return destination_path
+
+
+def holding_subdir(
+    holding_directory: Path, parts: tuple[str, ...], create: bool
+) -> Path:
+    """The folder HOLDING_DIRECTORY/PARTS..., checked one component at a time.
+
+    Every existing component must be a real folder, never a symlink: a link
+    anywhere below the holding directory would send moves, and the holding
+    pass's deletions, somewhere else entirely.
+
+    Args:
+        holding_directory: The configured holding directory (itself checked by
+            read_config).
+        parts: Path components below it.
+        create: Create missing components; otherwise stop at the first one
+            missing and return the path as it would be.
+
+    Raises:
+        OSError: A component is a symlink or not a folder.
+    """
+    current = holding_directory
+    for part in parts:
+        current = current / part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            if not create:
+                return holding_directory.joinpath(*parts)
+            current.mkdir()
+            continue
+        if not stat.S_ISDIR(mode):
+            raise OSError(
+                errno.ENOTDIR, "symlink or non-folder in the holding path", str(current)
+            )
+    return current
 
 
 def last_touched(path: Path) -> float:
@@ -314,6 +348,12 @@ def read_config(config_path: Path) -> dict[str, Any]:
         logger.error(f"Invalid holding directory path: {holding_dir}")
         sys.exit(1)
 
+    # A symlinked holding directory could point anywhere, and inside a monitored
+    # folder the link itself would eventually expire and be moved.
+    if holding_dir.is_symlink():
+        logger.error(f"Holding directory [{holding_dir}] must not be a symlink.")
+        sys.exit(1)
+
     if not holding_dir.exists():
         logger.error(f"Holding directory [{holding_dir}] does not exist.")
         sys.exit(1)
@@ -421,8 +461,14 @@ def main(config_path: Path, dry_run: bool) -> None:
         clean_folder(folder_path, days_old, holding_directory, dry_run)
 
         # Delete from holding pass.
-        deletion_path = holding_directory / str(folder_path).lstrip("/")
-        if deletion_path.exists():
+        try:
+            deletion_path = holding_subdir(
+                holding_directory, folder_path.absolute().parts[1:], create=False
+            )
+        except OSError as e:
+            logger.error(f"Not purging holding for {folder_path}: {e}")
+            continue
+        if deletion_path.is_dir():
             clean_folder(deletion_path, holding_age_limit, None, dry_run)
 
 

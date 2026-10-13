@@ -177,9 +177,6 @@ def scratch_with_holding(tmp_path: Path) -> tuple[Path, Path, Path]:
     return scratch, holding, holding / scratch.relative_to(scratch.anchor)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="review finding 1: symlinks in the holding path are followed"
-)
 def test_1_symlink_in_the_holding_path_never_redirects_deletion(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     outside = tmp_path / "outside"
@@ -315,9 +312,6 @@ def test_5_an_unreadable_subfolder_keeps_the_whole_entry(tmp_path):
                 p.chmod(0o755)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="review finding 6: a symlinked holding directory is accepted"
-)
 def test_6_a_symlinked_holding_directory_is_rejected(tmp_path):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
