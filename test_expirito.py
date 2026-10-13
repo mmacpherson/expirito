@@ -218,9 +218,6 @@ def test_2_a_held_folder_is_never_nested_into(tmp_path):
     assert sorted(p.name for p in held.iterdir()) != ["job"]  # new one sits beside it
 
 
-@pytest.mark.xfail(
-    strict=True, reason="review finding 3: shutil.move falls back to copy and delete"
-)
 def test_3_a_failed_rename_never_falls_back_to_copy_and_delete(tmp_path, monkeypatch):
     import errno
 
@@ -237,9 +234,6 @@ def test_3_a_failed_rename_never_falls_back_to_copy_and_delete(tmp_path, monkeyp
     assert (scratch / "job" / "data").read_text() == "keep me"
 
 
-@pytest.mark.xfail(
-    strict=True, reason="review finding 3: mount points are not detected"
-)
 def test_3_an_entry_containing_a_mount_point_is_left_alone(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "job" / "mnt").mkdir(parents=True)

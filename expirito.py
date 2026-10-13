@@ -7,6 +7,7 @@ import contextlib
 import errno
 import logging
 import os
+import re
 import shutil
 import stat
 import sys
@@ -81,11 +82,6 @@ def check_permissions(path: Path, mode: str) -> bool:
         return False
 
 
-def copy2_nofollow(*args):
-    """Modified version of copy2 to pass to shutil.move"""
-    return shutil.copy2(*args, follow_symlinks=False)
-
-
 def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> Path:
     """Move the file to the holding directory, replicating the entire path.
 
@@ -118,11 +114,12 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
     destination_path = free_name(destination_directory, source.name)
 
     if not dry_run:
+        # rename only: shutil.move would fall back to copy-then-delete when a
+        # rename fails (another filesystem, a busy mount point), and that can
+        # remove the source tree while the copy is incomplete.
         try:
-            shutil.move(
-                str(file_path), str(destination_path), copy_function=copy2_nofollow
-            )
-        except (OSError, PermissionError):
+            os.rename(source, destination_path)
+        except OSError:
             # Clean up any partially created directories
             if destination_directory.exists() and not any(
                 destination_directory.iterdir()
@@ -230,6 +227,29 @@ def is_tree_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
     )
 
 
+def mount_points() -> set[str]:
+    """Every mount point on this system, from /proc/self/mountinfo.
+
+    The table catches bind mounts too, which share their parent's device number
+    and so slip past an st_dev comparison. Empty where /proc is unavailable.
+    """
+    try:
+        lines = Path("/proc/self/mountinfo").read_text().splitlines()
+    except OSError:
+        return set()
+    # The fifth field is the mount point, with spaces and such escaped as \\ooo.
+    return {
+        re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), line.split()[4])
+        for line in lines
+    }
+
+
+def contains_mount(entry_path: Path, mounts: set[str]) -> bool:
+    """Whether ENTRY_PATH is a mount point or has one anywhere beneath it."""
+    entry = os.fspath(entry_path.resolve())
+    return any(m == entry or m.startswith(entry + "/") for m in mounts)
+
+
 def contains_holding(entry_path: Path, holding_directory: Path | None) -> bool:
     """Whether ENTRY_PATH is the holding directory or a folder containing it.
 
@@ -277,9 +297,13 @@ def clean_folder(
 
     if current_time is None:
         current_time = time.time()
+    mounts = mount_points()
     for entry_path in folder_path.iterdir():
         action = None
         if contains_holding(entry_path, holding_directory):
+            continue
+        if not entry_path.is_symlink() and contains_mount(entry_path, mounts):
+            logger.warning(f"Keeping {entry_path}: it is or contains a mount point")
             continue
         # A symlink to a folder is still just a link: date and remove the link.
         if entry_path.is_symlink() or not entry_path.is_dir():
