@@ -98,6 +98,9 @@ log_file: actions.log
 - `ignore` (optional, per directory): gitignore-style patterns for entries
   expirito must never move or delete, matched relative to that directory. A
   folder holding a match is kept whole, since moving it would move the match.
+  Patterns are checked at startup, before anything is touched. Watched
+  directories must not repeat or nest, so each path is governed by exactly one
+  set of patterns.
 - `log_file`: The path to the log file where Expirito will log its actions.
 
 Without `-c`, expirito reads `$XDG_CONFIG_HOME/expirito/config.yaml`

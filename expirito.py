@@ -605,6 +605,12 @@ def read_config(config_path: Path) -> dict[str, Any]:
                 f"'ignore' at index {i} must be a list of gitignore-style patterns"
             )
             sys.exit(1)
+        # Compile now, so a bad pattern stops the run before anything is touched.
+        try:
+            GitIgnoreSpec.from_lines(ignore)
+        except ValueError as e:
+            logger.error(f"Invalid ignore pattern at index {i} ({dir_path}): {e}")
+            sys.exit(1)
 
         # Validate age_limit
         age_limit = cd["age_limit"]
@@ -613,6 +619,15 @@ def read_config(config_path: Path) -> dict[str, Any]:
                 f"Invalid age_limit [{age_limit}] at index {i}. Must be 1-36500 days."
             )
             sys.exit(1)
+
+    # Each path has one owner: a nested or repeated watcher would run without the
+    # other's ignore patterns and could move what that one protects.
+    roots = [Path(cd["path"]).resolve() for cd in config["directories"]]
+    for i, a in enumerate(roots):
+        for b in roots[i + 1 :]:
+            if a == b or a in b.parents or b in a.parents:
+                logger.error(f"Watched directories must not repeat or nest: {a}, {b}")
+                sys.exit(1)
 
     return config
 

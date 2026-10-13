@@ -697,7 +697,6 @@ def test_the_default_config_follows_xdg_config_home(tmp_path, monkeypatch):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.0 review F1: overlapping watchers accepted")
 @pytest.mark.parametrize("second", ["job", "."])
 def test_nested_or_repeated_watched_directories_are_refused(tmp_path, second):
     import yaml
@@ -721,7 +720,6 @@ def test_nested_or_repeated_watched_directories_are_refused(tmp_path, second):
         expirito.read_config(config)
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.0 review F2: bad patterns pass validation")
 def test_an_invalid_pattern_is_refused_before_anything_runs(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     config = write_config(tmp_path / "c.yaml", holding, scratch)
