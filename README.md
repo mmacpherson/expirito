@@ -53,21 +53,20 @@ Place the `config.yaml` file in the `~/.config/expirito` directory (or another s
 
 ## Systemd Timer
 
-1. Copy the `expirito.service` and `expirito.timer` files to the `~/.config/systemd/user/` directory.
-2. Reload the systemd user daemon by running:
-   ```
-   systemctl --user daemon-reload
-   ```
-3. Enable and start the timer by running:
-   ```
-   systemctl --user enable --now expirito.timer
-   ```
-4. To check the timer's status, run:
-   ```
-   systemctl --user list-timers
-   ```
+The Arch package installs `expirito.service` and `expirito.timer` as user units;
+enable the timer with:
 
-Expirito will now run automatically at 2am every day.
+```
+systemctl --user enable --now expirito.timer
+```
+
+With a uv install, copy both files from `systemd/` to `~/.config/systemd/user/`,
+change the service's `ExecStart=` to `%h/.local/bin/expirito` (where `uv tool`
+puts commands), run `systemctl --user daemon-reload`, then enable the timer as
+above.
+
+The timer runs expirito daily at 2am; `systemctl --user list-timers` shows it. A
+run that leaves anything undone exits 1 and shows as a failed unit.
 
 ## License
 

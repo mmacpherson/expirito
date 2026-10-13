@@ -361,9 +361,6 @@ def test_9_dry_run_writes_nothing(tmp_path, monkeypatch):
     assert (scratch / "old.txt").exists()
 
 
-@pytest.mark.xfail(
-    strict=True, reason="review finding 10: the unit runs the script through python3"
-)
 def test_10_the_systemd_unit_runs_the_installed_command():
     unit = (Path(__file__).parent / "systemd" / "expirito.service").read_text()
     assert "ExecStart=/usr/bin/expirito" in unit.splitlines()
