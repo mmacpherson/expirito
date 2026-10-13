@@ -174,6 +174,7 @@ def scratch_with_holding(tmp_path: Path) -> tuple[Path, Path, Path]:
     scratch = tmp_path / "scratch"
     holding = scratch / ".expired"
     holding.mkdir(parents=True)
+    holding.chmod(0o700)  # holding is private to expirito's user
     return scratch, holding, holding / scratch.relative_to(scratch.anchor)
 
 
@@ -519,3 +520,87 @@ def test_s8_moving_into_holding_restarts_the_entry_clock(tmp_path):
     assert moved.is_dir()
     expirito.clean_folder(held, 14, None, False, time.time() + 15 * DAY)
     assert not moved.exists()
+
+
+# --- Third review pass (2026-10): the private-holding contract, enforced. ---
+
+
+@pytest.mark.xfail(
+    strict=True, reason="third pass 2: a holding others can enter is accepted"
+)
+def test_t2_holding_must_be_mode_0700(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    holding.chmod(0o755)
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+
+    with pytest.raises(SystemExit):
+        expirito.read_config(config)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="third pass 2: a parent others can write is accepted"
+)
+def test_t2_a_parent_others_can_write_is_refused(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    scratch.chmod(0o777)  # anyone could rename .expired away and put a link there
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+    try:
+        with pytest.raises(SystemExit):
+            expirito.read_config(config)
+    finally:
+        scratch.chmod(0o755)
+
+
+def test_t2_a_sticky_shared_parent_is_fine(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    scratch.chmod(0o1777)  # like /tmp: others cannot rename what they do not own
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+    try:
+        expirito.read_config(config)
+    finally:
+        scratch.chmod(0o755)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="third pass 2: writable folders inside holding are walked"
+)
+def test_t2_a_writable_folder_inside_holding_is_refused(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    held.mkdir(parents=True)
+    held.parent.chmod(0o777)
+    (scratch / "old.txt").write_text("expiring")
+
+    failures = expirito.clean_folder(
+        scratch, 60, holding, False, time.time() + 61 * DAY
+    )
+
+    assert (scratch / "old.txt").exists()
+    assert failures
+
+
+@pytest.mark.xfail(
+    strict=True, reason="third pass 3: a symlink above holding is accepted"
+)
+def test_t3_a_symlink_above_holding_is_refused(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(scratch)
+    config = write_config(tmp_path / "c.yaml", alias / ".expired", alias)
+
+    with pytest.raises(SystemExit):
+        expirito.read_config(config)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="third pass 5: Linux without renameat2 falls back to replacing"
+)
+def test_t5_linux_without_renameat2_refuses_to_move(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    (tmp_path / "a").write_text("a")
+    monkeypatch.setattr(expirito, "_LIBC", SimpleNamespace())  # no renameat2
+    monkeypatch.setattr(expirito.sys, "platform", "linux")
+
+    with pytest.raises(OSError):
+        expirito.rename_noreplace(tmp_path / "a", tmp_path / "c")
+    assert (tmp_path / "a").exists()
