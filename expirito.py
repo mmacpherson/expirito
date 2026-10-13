@@ -115,7 +115,7 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
     destination_directory = holding_subdir(
         holding_directory, source.parent.parts[1:], create=not dry_run
     )
-    destination_path = destination_directory / source.name
+    destination_path = free_name(destination_directory, source.name)
 
     if not dry_run:
         try:
@@ -132,6 +132,20 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
             raise
 
     return destination_path
+
+
+def free_name(folder: Path, name: str) -> Path:
+    """FOLDER/NAME, or NAME.1, NAME.2, ... if taken, so a move never replaces a
+    held entry or lands inside a held folder of the same name.
+
+    The check and the later rename are not one atomic step; runs are serialized
+    by the lock in main, and nothing else should write into holding.
+    """
+    candidate, n = folder / name, 0
+    while os.path.lexists(candidate):
+        n += 1
+        candidate = folder / f"{name}.{n}"
+    return candidate
 
 
 def holding_subdir(

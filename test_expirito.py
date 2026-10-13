@@ -192,9 +192,6 @@ def test_1_symlink_in_the_holding_path_never_redirects_deletion(tmp_path, monkey
     assert (outside / "precious.txt").exists()
 
 
-@pytest.mark.xfail(
-    strict=True, reason="review finding 2: moves into holding replace existing entries"
-)
 def test_2_a_held_file_is_never_overwritten(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     held.mkdir(parents=True)
@@ -207,10 +204,6 @@ def test_2_a_held_file_is_never_overwritten(tmp_path):
     assert contents == ["expiring now", "held earlier"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="review finding 2: moves into holding nest into existing folders",
-)
 def test_2_a_held_folder_is_never_nested_into(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (held / "job").mkdir(parents=True)
