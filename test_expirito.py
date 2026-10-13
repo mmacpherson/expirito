@@ -695,3 +695,77 @@ def test_the_default_config_follows_xdg_config_home(tmp_path, monkeypatch):
     assert (
         expirito.default_config_path() == tmp_path / "xdg" / "expirito" / "config.yaml"
     )
+
+
+@pytest.mark.xfail(strict=True, reason="1.3.0 review F1: overlapping watchers accepted")
+@pytest.mark.parametrize("second", ["job", "."])
+def test_nested_or_repeated_watched_directories_are_refused(tmp_path, second):
+    import yaml
+
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    (scratch / "job").mkdir()
+    config = tmp_path / "c.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "holding_directory": str(holding),
+                "holding_age_limit": 14,
+                "directories": [
+                    {"path": str(scratch), "age_limit": 60, "ignore": ["AGENTS.md"]},
+                    {"path": str(scratch / second), "age_limit": 60},
+                ],
+            }
+        )
+    )
+    with pytest.raises(SystemExit):
+        expirito.read_config(config)
+
+
+@pytest.mark.xfail(strict=True, reason="1.3.0 review F2: bad patterns pass validation")
+def test_an_invalid_pattern_is_refused_before_anything_runs(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+    config.write_text(
+        config.read_text().replace("age_limit: 60", "age_limit: 60\n  ignore: ['!']")
+    )
+    with pytest.raises(SystemExit):
+        expirito.read_config(config)
+
+
+@pytest.mark.parametrize(
+    ("patterns", "kept", "moved"),
+    [
+        (["/AGENTS.md"], ["AGENTS.md"], ["job"]),  # root-anchored: job/AGENTS.md goes
+        (["AGENTS.md"], ["AGENTS.md", "job"], []),  # unanchored: any depth
+        (["*.md", "!AGENTS.md"], [], ["AGENTS.md", "job"]),  # negation re-includes
+    ],
+)
+def test_gitignore_anchoring_and_negation(tmp_path, patterns, kept, moved):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    (scratch / "AGENTS.md").write_text("root notes")
+    (scratch / "job").mkdir()
+    (scratch / "job" / "AGENTS.md").write_text("job notes")
+
+    expirito.clean_folder(
+        scratch, 60, holding, False, time.time() + 61 * DAY, ignore=patterns
+    )
+
+    for name in kept:
+        assert (scratch / name).exists(), name
+    for name in moved:
+        assert not (scratch / name).exists(), name
+
+
+def test_a_directory_pattern_does_not_protect_a_link_to_a_folder(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "precious").write_text("x")
+    (scratch / "keep").symlink_to(outside)
+
+    expirito.clean_folder(
+        scratch, 60, holding, False, time.time() + 61 * DAY, ignore=["keep/"]
+    )
+
+    assert not (scratch / "keep").is_symlink()  # the link expired as a link
+    assert (outside / "precious").exists()  # its target was never touched
