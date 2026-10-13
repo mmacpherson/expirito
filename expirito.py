@@ -222,10 +222,28 @@ def is_tree_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
 
     Returns:
         True if all entries in the tree are older than the age limit, False otherwise.
+
+    Raises:
+        OSError: Some part of the tree could not be inspected, or lies on another
+            filesystem. An unread corner might hold recent data, so the tree must
+            not be judged old.
     """
-    return is_old_enough(path, age_limit, current_time) and all(
-        is_old_enough(p, age_limit, current_time) for p in path.glob("**/*")
-    )
+    if not is_old_enough(path, age_limit, current_time):
+        return False
+    device = path.lstat().st_dev
+
+    def stop(error: OSError) -> None:
+        raise error
+
+    # os.walk does not follow links to folders; they are dated as links below.
+    for dirpath, dirnames, filenames in os.walk(path, onerror=stop):
+        for name in dirnames + filenames:
+            entry = Path(dirpath) / name
+            if entry.lstat().st_dev != device:
+                raise OSError(errno.EXDEV, "another filesystem inside", str(entry))
+            if not is_old_enough(entry, age_limit, current_time):
+                return False
+    return True
 
 
 def mount_points() -> set[str]:
@@ -257,7 +275,13 @@ def expired(entry_path: Path, age_limit: int, current_time: float) -> bool:
     # A symlink to a folder is still just a link: date and remove the link.
     if entry_path.is_symlink() or not entry_path.is_dir():
         return is_old_enough(entry_path, age_limit, current_time)
-    return is_tree_old_enough(entry_path, age_limit, current_time)
+    try:
+        return is_tree_old_enough(entry_path, age_limit, current_time)
+    except OSError as e:
+        logger.warning(
+            f"Keeping {entry_path}: cannot inspect {e.filename}: {e.strerror}"
+        )
+        return False
 
 
 def contains_holding(entry_path: Path, holding_directory: Path | None) -> bool:

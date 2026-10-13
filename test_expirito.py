@@ -283,7 +283,6 @@ def test_4_concurrent_runs_are_refused(tmp_path, monkeypatch):
     assert failures
 
 
-@pytest.mark.xfail(strict=True, reason="review finding 5: glob hides scan errors")
 def test_5_an_unreadable_subfolder_keeps_the_whole_entry(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     hidden = scratch / "job" / "private"
