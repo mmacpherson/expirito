@@ -386,9 +386,6 @@ def test_11_srcinfo_matches_the_pkgbuild():
 # --- Second review pass (2026-10): residual gaps in the first fixes. ---
 
 
-@pytest.mark.xfail(
-    strict=True, reason="second pass 2: a shared holding directory is accepted"
-)
 def test_s2_a_holding_directory_others_can_write_is_refused(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     holding.chmod(0o777)

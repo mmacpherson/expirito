@@ -374,6 +374,17 @@ def read_config(config_path: Path) -> dict[str, Any]:
         logger.error(f"Holding directory [{holding_dir}] does not exist.")
         sys.exit(1)
 
+    # Holding must belong to expirito's user alone. Checking each path component
+    # cannot stop another writer from swapping one for a symlink a moment later,
+    # or from creating a destination between choosing a name and the rename.
+    held = holding_dir.stat()
+    if held.st_uid != os.getuid() or held.st_mode & 0o022:
+        logger.error(
+            f"Holding directory [{holding_dir}] must be owned by this user and "
+            "writable by no one else (chmod go-w)."
+        )
+        sys.exit(1)
+
     # Validate holding_age_limit
     holding_age = config["holding_age_limit"]
     if (
