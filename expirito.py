@@ -469,7 +469,8 @@ def main(config_path: Path, dry_run: bool) -> int:
     config = read_config(config_path)
 
     # Set up file logging if specified
-    if "log_file" in config:
+    # A dry run writes nothing, its log included: console only.
+    if "log_file" in config and not dry_run:
         setup_file_logging(config["log_file"])
 
     holding_directory = Path(config["holding_directory"])

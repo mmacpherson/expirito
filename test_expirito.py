@@ -348,7 +348,6 @@ def test_8_failures_make_the_run_exit_nonzero(tmp_path, monkeypatch):
     assert exited.value.code not in (0, None)
 
 
-@pytest.mark.xfail(strict=True, reason="review finding 9: dry run opens the log file")
 def test_9_dry_run_writes_nothing(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "old.txt").write_text("expiring")
