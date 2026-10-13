@@ -14,7 +14,7 @@ import stat
 import sys
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import yaml
 
@@ -26,61 +26,12 @@ console_handler.setFormatter(logging.Formatter("%(asctime)s: %(message)s"))
 logger.addHandler(console_handler)
 
 
-def validate_path(path: Path, base_path: Path | None = None) -> bool:
-    """Validate that a path is safe from traversal attacks.
+def validate_path(path: Path) -> bool:
+    """Reject paths with ".." components (a traversal guard for configured paths).
 
-    Args:
-        path: The path to validate
-        base_path: Optional base path that the path must be within
-
-    Returns:
-        True if the path is safe, False otherwise
+    Containment below the holding directory is enforced by holding_subdir.
     """
-    try:
-        # Resolve to absolute path, following symlinks
-        resolved = path.resolve(strict=False)
-
-        # Check for path traversal attempts
-        if ".." in path.parts:
-            return False
-
-        # If base_path provided, ensure path is within it
-        if base_path:
-            base_resolved = base_path.resolve(strict=False)
-            try:
-                resolved.relative_to(base_resolved)
-            except ValueError:
-                # Path is outside base_path
-                return False
-
-        return True
-    except (OSError, ValueError):
-        return False
-
-
-def check_permissions(path: Path, mode: str) -> bool:
-    """Check if we have the required permissions for a path.
-
-    Args:
-        path: The path to check
-        mode: 'r' for read, 'w' for write, 'x' for execute
-
-    Returns:
-        True if we have the required permissions
-    """
-    try:
-        if mode == "r":
-            return os.access(path, os.R_OK)
-        elif mode == "w":
-            # For write, check parent directory if path doesn't exist
-            check_path = path if path.exists() else path.parent
-            return os.access(check_path, os.W_OK)
-        elif mode == "x":
-            return os.access(path, os.X_OK)
-        else:
-            return False
-    except OSError:
-        return False
+    return ".." not in path.parts
 
 
 def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> Path:
@@ -99,13 +50,6 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
         raise ValueError(f"Invalid source path: {file_path}")
     if not validate_path(holding_directory):
         raise ValueError(f"Invalid holding directory: {holding_directory}")
-
-    # Check permissions
-    if not dry_run:
-        if not check_permissions(file_path, "r"):
-            raise PermissionError(f"No read permission for: {file_path}")
-        if not check_permissions(holding_directory, "w"):
-            raise PermissionError(f"No write permission for: {holding_directory}")
 
     # The entry keeps its full original path below the holding directory.
     source = file_path.absolute()
@@ -324,60 +268,54 @@ def clean_folder(
         logger.error(f"Invalid path: {folder_path}")
         return
 
-    # Check read permissions
-    if not check_permissions(folder_path, "r"):
-        logger.error(f"No read permission for: {folder_path}")
-        return
-
     if current_time is None:
         current_time = time.time()
+    try:
+        entries = sorted(folder_path.iterdir())
+    except OSError as e:
+        logger.error(f"Cannot list {folder_path}: {e}")
+        return
     mounts = mount_points()
-    for entry_path in folder_path.iterdir():
-        action = None
+    for entry_path in entries:
         if contains_holding(entry_path, holding_directory):
             continue
-        if not entry_path.is_symlink() and contains_mount(entry_path, mounts):
-            logger.warning(f"Keeping {entry_path}: it is or contains a mount point")
-            continue
-        if expired(entry_path, days_old, current_time):
-            action = "move" if holding_directory else "delete"
-
-        if action is None:
-            continue
-        # Something may have written into the entry since the scan; look again
-        # right before acting so the window for that is as small as it can be.
-        if not dry_run and not expired(entry_path, days_old, current_time):
-            logger.info(f"Keeping {entry_path}: it changed since the scan")
-            continue
-        elif action == "move":
-            try:
-                destination_path = move_to_holding(
-                    entry_path, cast(Path, holding_directory), dry_run
-                )
-                action_log = f"Moved {entry_path} to {destination_path}"
-            except (OSError, PermissionError, ValueError) as e:
-                logger.error(f"Failed to move {entry_path}: {e}")
+        try:
+            if not entry_path.is_symlink() and contains_mount(entry_path, mounts):
+                logger.warning(f"Keeping {entry_path}: it is or contains a mount point")
                 continue
-        elif action == "delete":
-            if not dry_run:
-                try:
-                    # Check permissions right before deletion
-                    if not check_permissions(entry_path, "w"):
-                        logger.error(f"No write permission for: {entry_path}")
-                        continue
+            if not expired(entry_path, days_old, current_time):
+                continue
+            if dry_run:
+                if holding_directory:
+                    planned = move_to_holding(entry_path, holding_directory, True)
+                    logger.info(f"Would move {entry_path} to {planned}")
+                else:
+                    logger.info(f"Would delete {entry_path}")
+                continue
+            # Something may have written into the entry since the scan; look
+            # again right before acting, so that window is as small as it can be.
+            if not expired(entry_path, days_old, current_time):
+                logger.info(f"Keeping {entry_path}: it changed since the scan")
+                continue
+            if holding_directory:
+                destination = move_to_holding(entry_path, holding_directory, False)
+                logger.info(f"Moved {entry_path} to {destination}")
+            else:
+                delete_entry(entry_path)
+                logger.info(f"Deleted {entry_path}")
+        except FileNotFoundError:
+            continue  # gone since the listing: nothing left to do
+        except (OSError, ValueError) as e:
+            verb = "move" if holding_directory else "delete"
+            logger.error(f"Failed to {verb} {entry_path}: {e}")
 
-                    if entry_path.is_file() or entry_path.is_symlink():
-                        entry_path.unlink()
-                    else:
-                        shutil.rmtree(entry_path)
-                except (OSError, PermissionError) as e:
-                    logger.error(f"Failed to delete {entry_path}: {e}")
-                    continue
-            action_log = f"Deleted {entry_path}"
-        else:
-            raise NotImplementedError(f"Unexpected action state [{action}].")
 
-        logger.info(action_log)
+def delete_entry(entry_path: Path) -> None:
+    """Delete a file or link, or a whole folder tree (links inside are not followed)."""
+    if entry_path.is_symlink() or not entry_path.is_dir():
+        entry_path.unlink()
+    else:
+        shutil.rmtree(entry_path)
 
 
 def setup_file_logging(log_file: str) -> None:

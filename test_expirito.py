@@ -310,9 +310,6 @@ def test_6_a_symlinked_holding_directory_is_rejected(tmp_path):
         expirito.read_config(config)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="review finding 7: permission checks follow link targets"
-)
 def test_7_an_expired_dangling_link_is_moved(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "dangling").symlink_to(tmp_path / "unmounted")
@@ -322,10 +319,6 @@ def test_7_an_expired_dangling_link_is_moved(tmp_path):
     assert (held / "dangling").is_symlink()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="review finding 7: deletion requires a writable file, not a writable parent",
-)
 def test_7_a_read_only_held_file_is_still_deleted(tmp_path):
     held = tmp_path / "held"
     held.mkdir()
