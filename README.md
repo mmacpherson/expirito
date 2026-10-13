@@ -18,11 +18,15 @@ directory and eventually deletes them after a defined period.
   unmounted disk).
 - The holding directory may live inside a monitored directory (for example
   `/mnt/scratch/.expired`); it is skipped, never moved into itself.
-- The holding directory belongs to expirito alone. It must be a real folder
-  (not a symlink), owned by the user running expirito and writable by no one
-  else, or expirito refuses to start. Its path components must not be symlinks
-  or mount points; entries held there that happen to be symlinks are fine.
-  Don't work in holding: a quarantined entry is waiting to be deleted.
+- The holding directory belongs to expirito alone, or expirito refuses to
+  start. It must be a real folder of mode 0700 owned by the user running
+  expirito, with no symlink above it, and every folder above it must be owned
+  by that user or root and writable by no one else unless it is sticky (like
+  `/tmp`): whoever can write a folder can rename what is in it. Folders inside
+  holding are checked the same way as they are walked, and must not be
+  symlinks or mount points; entries held there that happen to be symlinks are
+  fine. Another process running as the same user is not stopped by any of
+  this, so don't work in holding: a quarantined entry is waiting to be deleted.
 - Nothing in holding is replaced: a taken name gives `NAME.1`, `NAME.2`, and so
   on. On Linux the move is one atomic no-replace rename (`renameat2`), so this
   holds even if a name is taken at the last moment; elsewhere it is a check
@@ -41,6 +45,12 @@ directory and eventually deletes them after a defined period.
   contain a mount point are a deliberate skip, logged without failing the run.
   `--dry-run` changes nothing, writes no log, and plans the same destinations
   a real run would choose; it cannot predict errors the real run will meet.
+
+## Upgrading to 1.2.0
+
+The holding directory must now be private: `chmod 700` it (and fix any folder
+above it that others can write) before the first run, or expirito will refuse to
+start and say why.
 
 ## Installation
 

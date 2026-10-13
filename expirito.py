@@ -106,12 +106,20 @@ def rename_noreplace(source: Path, destination: Path) -> None:
     """Rename SOURCE to DESTINATION, raising FileExistsError if DESTINATION exists.
 
     On Linux this is one atomic step (renameat2 with RENAME_NOREPLACE), so a name
-    taken after free_name looked is never replaced; a filesystem that cannot do
-    it fails the move rather than risk a replacing rename. Elsewhere the check
-    and the rename are two steps.
+    taken after free_name looked is never replaced. A filesystem that cannot do
+    it, or a C library without renameat2, fails the move rather than risk a
+    replacing rename. Elsewhere than Linux the check and the rename are two steps.
     """
     renameat2 = getattr(_LIBC, "renameat2", None)
     if renameat2 is None:
+        if sys.platform.startswith("linux"):
+            # The guarantee is promised on Linux; never quietly drop to a
+            # rename that could replace.
+            raise OSError(
+                errno.ENOSYS,
+                "renameat2 is not available; refusing a rename that could replace",
+                str(source),
+            )
         if os.path.lexists(destination):
             raise FileExistsError(errno.EEXIST, "File exists", str(destination))
         os.rename(source, destination)
@@ -167,7 +175,8 @@ def holding_subdir(
             missing and return the path as it would be.
 
     Raises:
-        OSError: A component is a symlink, not a folder, or a mount point.
+        OSError: A component is a symlink, not a folder, a mount point, or a
+            folder another user owns or others can write.
     """
     mounts = mount_points()
     current = holding_directory
@@ -176,15 +185,22 @@ def holding_subdir(
         if os.fspath(current.absolute()) in mounts:
             raise OSError(errno.EXDEV, "mount point in the holding path", str(current))
         try:
-            mode = current.lstat().st_mode
+            st = current.lstat()
         except FileNotFoundError:
             if not create:
                 return holding_directory.joinpath(*parts)
             current.mkdir()
             continue
-        if not stat.S_ISDIR(mode):
+        if not stat.S_ISDIR(st.st_mode):
             raise OSError(
                 errno.ENOTDIR, "symlink or non-folder in the holding path", str(current)
+            )
+        # A folder someone else can write would let them swap what is below it.
+        if st.st_uid != os.getuid() or st.st_mode & 0o022:
+            raise OSError(
+                errno.EPERM,
+                "folder in the holding path that another user owns or others can write",
+                str(current),
             )
     return current
 
@@ -434,6 +450,34 @@ def setup_file_logging(log_file: str) -> None:
         logger.warning(f"Could not set up file logging: {e}")
 
 
+def holding_problem(holding_dir: Path) -> str | None:
+    """Why HOLDING_DIR is not private to this user, or None if it is.
+
+    Checking each path component as it is used cannot stop another writer from
+    swapping one for a symlink a moment later, so holding must be a place no one
+    else can change: mode 0700 and owned by this user; no symlink above it,
+    which would also hide mount points under another spelling; and every folder
+    above it owned by this user or root and writable by no one else, unless it
+    is sticky (like /tmp), since whoever can write a folder can rename what is
+    in it. Another process running as this same user is not stopped by any of
+    this; holding belongs to expirito alone by agreement.
+    """
+    if holding_dir.resolve() != holding_dir.absolute():
+        return "must not have a symlink above it"
+    st = holding_dir.stat()
+    if st.st_uid != os.getuid():
+        return "must be owned by this user"
+    if st.st_mode & 0o077:
+        return "must be mode 0700 (chmod 700)"
+    for parent in holding_dir.absolute().parents:
+        st = parent.stat()
+        if st.st_uid not in (os.getuid(), 0):
+            return f"is inside {parent}, owned by another user"
+        if st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX:
+            return f"is inside {parent}, which others can write"
+    return None
+
+
 def read_config(config_path: Path) -> dict[str, Any]:
     """Read the configuration file.
 
@@ -469,15 +513,9 @@ def read_config(config_path: Path) -> dict[str, Any]:
         logger.error(f"Holding directory [{holding_dir}] does not exist.")
         sys.exit(1)
 
-    # Holding must belong to expirito's user alone. Checking each path component
-    # cannot stop another writer from swapping one for a symlink a moment later,
-    # or from creating a destination between choosing a name and the rename.
-    held = holding_dir.stat()
-    if held.st_uid != os.getuid() or held.st_mode & 0o022:
-        logger.error(
-            f"Holding directory [{holding_dir}] must be owned by this user and "
-            "writable by no one else (chmod go-w)."
-        )
+    problem = holding_problem(holding_dir)
+    if problem:
+        logger.error(f"Holding directory [{holding_dir}] {problem}.")
         sys.exit(1)
 
     # Validate holding_age_limit

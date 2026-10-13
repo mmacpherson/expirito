@@ -525,9 +525,6 @@ def test_s8_moving_into_holding_restarts_the_entry_clock(tmp_path):
 # --- Third review pass (2026-10): the private-holding contract, enforced. ---
 
 
-@pytest.mark.xfail(
-    strict=True, reason="third pass 2: a holding others can enter is accepted"
-)
 def test_t2_holding_must_be_mode_0700(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     holding.chmod(0o755)
@@ -537,9 +534,6 @@ def test_t2_holding_must_be_mode_0700(tmp_path):
         expirito.read_config(config)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="third pass 2: a parent others can write is accepted"
-)
 def test_t2_a_parent_others_can_write_is_refused(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     scratch.chmod(0o777)  # anyone could rename .expired away and put a link there
@@ -561,9 +555,6 @@ def test_t2_a_sticky_shared_parent_is_fine(tmp_path):
         scratch.chmod(0o755)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="third pass 2: writable folders inside holding are walked"
-)
 def test_t2_a_writable_folder_inside_holding_is_refused(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     held.mkdir(parents=True)
@@ -578,9 +569,6 @@ def test_t2_a_writable_folder_inside_holding_is_refused(tmp_path):
     assert failures
 
 
-@pytest.mark.xfail(
-    strict=True, reason="third pass 3: a symlink above holding is accepted"
-)
 def test_t3_a_symlink_above_holding_is_refused(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     alias = tmp_path / "alias"
@@ -591,9 +579,6 @@ def test_t3_a_symlink_above_holding_is_refused(tmp_path):
         expirito.read_config(config)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="third pass 5: Linux without renameat2 falls back to replacing"
-)
 def test_t5_linux_without_renameat2_refuses_to_move(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
