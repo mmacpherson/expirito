@@ -24,5 +24,6 @@ repos:
         # args: [--strict]
         additional_dependencies:
           [
-            types-pyyaml
+            types-pyyaml,
+            pytest
             ]
