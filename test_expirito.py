@@ -589,3 +589,26 @@ def test_t5_linux_without_renameat2_refuses_to_move(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         expirito.rename_noreplace(tmp_path / "a", tmp_path / "c")
     assert (tmp_path / "a").exists()
+
+
+# --- Fourth review pass (2026-10). ---
+
+
+@pytest.mark.xfail(
+    strict=True, reason="fourth pass 1: folders made under umask 0002 fail the checks"
+)
+def test_f1_holding_folders_made_under_a_group_umask_pass_the_checks(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    (scratch / "first.txt").write_text("a")
+    (scratch / "second.txt").write_text("b")
+    previous = os.umask(0o002)
+    try:
+        failures = expirito.clean_folder(
+            scratch, 60, holding, False, time.time() + 61 * DAY
+        )
+        failures += expirito.clean_folder(held, 14, None, False, time.time() + 1 * DAY)
+    finally:
+        os.umask(previous)
+
+    assert failures == 0
+    assert sorted(p.name for p in held.iterdir()) == ["first.txt", "second.txt"]
