@@ -366,7 +366,6 @@ def test_10_the_systemd_unit_runs_the_installed_command():
     assert "ExecStart=/usr/bin/expirito" in unit.splitlines()
 
 
-@pytest.mark.xfail(strict=True, reason="review finding 11: .SRCINFO is stale")
 def test_11_srcinfo_matches_the_pkgbuild():
     import shutil as sh
     import subprocess

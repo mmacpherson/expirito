@@ -17,7 +17,19 @@ directory and eventually deletes them after a defined period.
   touched. A dangling link is not removed early (its target may just be on an
   unmounted disk).
 - The holding directory may live inside a monitored directory (for example
-  `/mnt/scratch/.expired`); it is skipped, never moved into itself.
+  `/mnt/scratch/.expired`); it is skipped, never moved into itself. It must be a
+  real folder, not a symlink, and expirito refuses any symlink inside it.
+- Nothing is overwritten in holding: if a name is taken there, the newcomer
+  becomes `NAME.1`, `NAME.2`, and so on.
+- Moves are plain renames on one filesystem, never copy-then-delete. An entry
+  that is or contains a mount point, or that cannot be fully read, is left
+  alone and logged.
+- Each entry is checked again just before it is moved or deleted, and only one
+  run (holding a lock in the holding directory) acts at a time. A job that is
+  still writing into a folder it has not touched for the whole age limit can
+  race that last step; the holding period is the safety margin for that.
+- A run that leaves anything undone exits 1; `--dry-run` changes nothing and
+  writes no log.
 
 ## Installation
 
