@@ -4,6 +4,7 @@ __version__ = "1.2.0"
 
 import argparse
 import contextlib
+import ctypes
 import errno
 import fcntl
 import logging
@@ -63,7 +64,17 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
         # rename fails (another filesystem, a busy mount point), and that can
         # remove the source tree while the copy is incomplete.
         try:
-            os.rename(source, destination_path)
+            for _ in range(MAX_NAME_ATTEMPTS):
+                try:
+                    rename_noreplace(source, destination_path)
+                    break
+                except FileExistsError:
+                    # Taken since free_name looked: choose again.
+                    destination_path = free_name(destination_directory, source.name)
+            else:
+                raise FileExistsError(
+                    errno.EEXIST, "no free name in holding", str(destination_path)
+                )
         except OSError:
             # Clean up any partially created directories
             if destination_directory.exists() and not any(
@@ -76,12 +87,51 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
     return destination_path
 
 
+MAX_NAME_ATTEMPTS = 10
+AT_FDCWD = -100
+RENAME_NOREPLACE = 1
+_LIBC = ctypes.CDLL(None, use_errno=True) if sys.platform.startswith("linux") else None
+
+
+def rename_noreplace(source: Path, destination: Path) -> None:
+    """Rename SOURCE to DESTINATION, raising FileExistsError if DESTINATION exists.
+
+    On Linux this is one atomic step (renameat2 with RENAME_NOREPLACE), so a name
+    taken after free_name looked is never replaced; a filesystem that cannot do
+    it fails the move rather than risk a replacing rename. Elsewhere the check
+    and the rename are two steps.
+    """
+    renameat2 = getattr(_LIBC, "renameat2", None)
+    if renameat2 is None:
+        if os.path.lexists(destination):
+            raise FileExistsError(errno.EEXIST, "File exists", str(destination))
+        os.rename(source, destination)
+        return
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+    if renameat2(
+        AT_FDCWD,
+        os.fsencode(source),
+        AT_FDCWD,
+        os.fsencode(destination),
+        RENAME_NOREPLACE,
+    ):
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), str(source), None, str(destination))
+
+
 def free_name(folder: Path, name: str) -> Path:
     """FOLDER/NAME, or NAME.1, NAME.2, ... if taken, so a move never replaces a
     held entry or lands inside a held folder of the same name.
 
-    The check and the later rename are not one atomic step; runs are serialized
-    by the lock in main, and nothing else should write into holding.
+    The rename itself refuses to replace (rename_noreplace), so a name taken in
+    the meantime only means choosing again.
     """
     candidate, n = folder / name, 0
     while os.path.lexists(candidate):

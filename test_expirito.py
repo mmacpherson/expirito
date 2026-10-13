@@ -228,7 +228,7 @@ def test_3_a_failed_rename_never_falls_back_to_copy_and_delete(tmp_path, monkeyp
     def busy(*args, **kwargs):
         raise OSError(errno.EBUSY, "Device or resource busy")
 
-    monkeypatch.setattr(expirito.os, "rename", busy)
+    monkeypatch.setattr(expirito, "rename_noreplace", busy)
     expirito.clean_folder(scratch, 60, holding, False, time.time() + 61 * DAY)
 
     assert (scratch / "job" / "data").read_text() == "keep me"
@@ -424,10 +424,6 @@ def test_s3_an_unreadable_mount_table_stops_the_run(tmp_path, monkeypatch):
     assert failures
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="second pass 5: rename replaces a destination made after naming",
-)
 def test_s5_a_destination_created_late_is_never_replaced(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "report").write_text("expiring now")
