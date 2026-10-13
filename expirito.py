@@ -189,7 +189,9 @@ def holding_subdir(
         except FileNotFoundError:
             if not create:
                 return holding_directory.joinpath(*parts)
-            current.mkdir()
+            # Explicit mode: under a group umask (0002) the default would be
+            # 0775, which the check below rejects on the next walk.
+            current.mkdir(mode=0o700)
             continue
         if not stat.S_ISDIR(st.st_mode):
             raise OSError(

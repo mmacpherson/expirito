@@ -18,15 +18,23 @@ directory and eventually deletes them after a defined period.
   unmounted disk).
 - The holding directory may live inside a monitored directory (for example
   `/mnt/scratch/.expired`); it is skipped, never moved into itself.
-- The holding directory belongs to expirito alone, or expirito refuses to
-  start. It must be a real folder of mode 0700 owned by the user running
-  expirito, with no symlink above it, and every folder above it must be owned
-  by that user or root and writable by no one else unless it is sticky (like
-  `/tmp`): whoever can write a folder can rename what is in it. Folders inside
-  holding are checked the same way as they are walked, and must not be
-  symlinks or mount points; entries held there that happen to be symlinks are
-  fine. Another process running as the same user is not stopped by any of
-  this, so don't work in holding: a quarantined entry is waiting to be deleted.
+- The holding directory belongs to expirito alone, and expirito checks three
+  kinds of folder:
+  - the holding directory itself must be a real folder owned by the user
+    running expirito, with no access for group or others (`chmod 700`);
+  - every folder above it must be owned by that user or root and writable by no
+    one else, unless it is sticky like `/tmp` (whoever can write a folder can
+    rename what is in it), and none may be a symlink;
+  - the folders expirito creates inside holding to mirror each entry's original
+    path (for example `.expired/mnt/scratch`) must belong to that user, be
+    writable by no one else, and be neither symlinks nor mount points. expirito
+    creates them `0700`.
+
+  A problem with the first two stops expirito at startup; a problem with the
+  third fails the moves and purge that need that folder. Entries held in
+  holding are not checked this way, and may themselves be symlinks. Another
+  process running as the same user is not stopped by any of this, so don't work
+  in holding: a quarantined entry is waiting to be deleted.
 - Nothing in holding is replaced: a taken name gives `NAME.1`, `NAME.2`, and so
   on. On Linux the move is one atomic no-replace rename (`renameat2`), so this
   holds even if a name is taken at the last moment; elsewhere it is a check
@@ -48,9 +56,12 @@ directory and eventually deletes them after a defined period.
 
 ## Upgrading to 1.2.0
 
-The holding directory must now be private: `chmod 700` it (and fix any folder
-above it that others can write) before the first run, or expirito will refuse to
-start and say why.
+The holding directory must now be private. Before the first run, `chmod 700`
+it and fix any folder above it that others can write; expirito refuses to start
+and says why otherwise. Folders an earlier version created inside holding to
+mirror original paths (such as `.expired/home` and `.expired/home/user`) must
+not be writable by group or others either; `chmod go-w` those mirror folders
+only, not the held entries inside them.
 
 ## Installation
 
