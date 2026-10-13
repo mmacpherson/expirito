@@ -395,9 +395,6 @@ def test_s2_a_holding_directory_others_can_write_is_refused(tmp_path):
         expirito.read_config(config)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="second pass 3: the purge root is not mount-checked"
-)
 def test_s3_a_mounted_purge_root_is_not_purged(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     held.mkdir(parents=True)
@@ -412,9 +409,6 @@ def test_s3_a_mounted_purge_root_is_not_purged(tmp_path, monkeypatch):
     assert failures
 
 
-@pytest.mark.xfail(
-    strict=True, reason="second pass 3: an unreadable mount table means no mounts"
-)
 def test_s3_an_unreadable_mount_table_stops_the_run(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     (scratch / "old.txt").write_text("expiring")

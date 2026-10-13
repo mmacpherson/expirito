@@ -107,11 +107,14 @@ def holding_subdir(
             missing and return the path as it would be.
 
     Raises:
-        OSError: A component is a symlink or not a folder.
+        OSError: A component is a symlink, not a folder, or a mount point.
     """
+    mounts = mount_points()
     current = holding_directory
     for part in parts:
         current = current / part
+        if os.fspath(current.absolute()) in mounts:
+            raise OSError(errno.EXDEV, "mount point in the holding path", str(current))
         try:
             mode = current.lstat().st_mode
         except FileNotFoundError:
@@ -190,21 +193,36 @@ def is_tree_old_enough(path: Path, age_limit: int, current_time: float) -> bool:
     return True
 
 
+MOUNTINFO = Path("/proc/self/mountinfo")
+
+
 def mount_points() -> set[str]:
     """Every mount point on this system, from /proc/self/mountinfo.
 
     The table catches bind mounts too, which share their parent's device number
-    and so slip past an st_dev comparison. Empty where /proc is unavailable.
+    and so slip past an st_dev comparison. Elsewhere than Linux there is no such
+    table and the result is empty; the tree walk's device check still applies.
+
+    Raises:
+        OSError: On Linux, the table cannot be read. Without it nothing can be
+            known to be safe, so the run must not proceed as if there were no mounts.
     """
-    try:
-        lines = Path("/proc/self/mountinfo").read_text().splitlines()
-    except OSError:
+    if not sys.platform.startswith("linux"):
         return set()
+    lines = MOUNTINFO.read_text().splitlines()
     # The fifth field is the mount point, with spaces and such escaped as \ooo (octal).
     return {
         re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), line.split()[4])
         for line in lines
     }
+
+
+def spans_a_mount(entry_path: Path) -> bool:
+    """Whether a top-level entry is or contains a mount point, read afresh.
+
+    A link is removed as a link, so what it points at does not matter.
+    """
+    return not entry_path.is_symlink() and contains_mount(entry_path, mount_points())
 
 
 def contains_mount(entry_path: Path, mounts: set[str]) -> bool:
@@ -278,13 +296,12 @@ def clean_folder(
     except OSError as e:
         logger.error(f"Cannot list {folder_path}: {e}")
         return 1
-    mounts = mount_points()
     failures = 0
     for entry_path in entries:
         if contains_holding(entry_path, holding_directory):
             continue
         try:
-            if not entry_path.is_symlink() and contains_mount(entry_path, mounts):
+            if spans_a_mount(entry_path):
                 logger.warning(f"Keeping {entry_path}: it is or contains a mount point")
                 continue
             if not expired(entry_path, days_old, current_time):
@@ -298,7 +315,9 @@ def clean_folder(
                 continue
             # Something may have written into the entry since the scan; look
             # again right before acting, so that window is as small as it can be.
-            if not expired(entry_path, days_old, current_time):
+            if spans_a_mount(entry_path) or not expired(
+                entry_path, days_old, current_time
+            ):
                 logger.info(f"Keeping {entry_path}: it changed since the scan")
                 continue
             if holding_directory:
