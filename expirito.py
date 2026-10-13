@@ -35,13 +35,20 @@ def validate_path(path: Path) -> bool:
     return ".." not in path.parts
 
 
-def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> Path:
+def move_to_holding(
+    file_path: Path,
+    holding_directory: Path,
+    dry_run: bool,
+    planned: set[Path] | None = None,
+) -> Path:
     """Move the file to the holding directory, replicating the entire path.
 
     Args:
         file_path: The file path to be moved.
         holding_directory: The holding directory path.
         dry_run: If True, print the action without actually moving the file.
+        planned: Destinations a dry run has already promised, so a later entry
+            is not promised the same name.
 
     Returns:
         The destination path in the holding directory.
@@ -57,7 +64,9 @@ def move_to_holding(file_path: Path, holding_directory: Path, dry_run: bool) -> 
     destination_directory = holding_subdir(
         holding_directory, source.parent.parts[1:], create=not dry_run
     )
-    destination_path = free_name(destination_directory, source.name)
+    destination_path = free_name(destination_directory, source.name, planned)
+    if dry_run and planned is not None:
+        planned.add(destination_path)
 
     if not dry_run:
         # rename only: shutil.move would fall back to copy-then-delete when a
@@ -126,15 +135,16 @@ def rename_noreplace(source: Path, destination: Path) -> None:
         raise OSError(err, os.strerror(err), str(source), None, str(destination))
 
 
-def free_name(folder: Path, name: str) -> Path:
+def free_name(folder: Path, name: str, planned: set[Path] | None = None) -> Path:
     """FOLDER/NAME, or NAME.1, NAME.2, ... if taken, so a move never replaces a
     held entry or lands inside a held folder of the same name.
 
     The rename itself refuses to replace (rename_noreplace), so a name taken in
-    the meantime only means choosing again.
+    the meantime only means choosing again. A dry run passes the names it has
+    already planned in PLANNED, since nothing actually moves into them.
     """
     candidate, n = folder / name, 0
-    while os.path.lexists(candidate):
+    while os.path.lexists(candidate) or candidate in (planned or ()):
         n += 1
         candidate = folder / f"{name}.{n}"
     return candidate
@@ -353,6 +363,7 @@ def clean_folder(
         logger.error(f"Cannot list {folder_path}: {e}")
         return 1
     failures = 0
+    planned: set[Path] = set()  # dry run: destinations already promised
     for entry_path in entries:
         if contains_holding(entry_path, holding_directory):
             continue
@@ -364,8 +375,10 @@ def clean_folder(
                 continue
             if dry_run:
                 if holding_directory:
-                    planned = move_to_holding(entry_path, holding_directory, True)
-                    logger.info(f"Would move {entry_path} to {planned}")
+                    destination = move_to_holding(
+                        entry_path, holding_directory, True, planned
+                    )
+                    logger.info(f"Would move {entry_path} to {destination}")
                 else:
                     logger.info(f"Would delete {entry_path}")
                 continue

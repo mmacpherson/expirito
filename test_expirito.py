@@ -429,8 +429,8 @@ def test_s5_a_destination_created_late_is_never_replaced(tmp_path, monkeypatch):
     (scratch / "report").write_text("expiring now")
     chosen = expirito.free_name
 
-    def choose_then_race(folder, name):
-        path = chosen(folder, name)
+    def choose_then_race(folder, name, *planned):
+        path = chosen(folder, name, *planned)
         path.write_text("created by someone else after the name was chosen")
         return path
 
@@ -475,9 +475,6 @@ def test_s6_a_rename_failing_on_its_destination_is_a_failure(tmp_path, monkeypat
     assert failures
 
 
-@pytest.mark.xfail(
-    strict=True, reason="second pass 7: dry run does not reserve planned names"
-)
 def test_s7_dry_run_plans_the_same_destinations_as_the_run(tmp_path, caplog):
     scratch, holding, held = scratch_with_holding(tmp_path)
     held.mkdir(parents=True)
