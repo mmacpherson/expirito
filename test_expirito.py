@@ -381,3 +381,161 @@ def test_11_srcinfo_matches_the_pkgbuild():
         check=True,
     ).stdout
     assert (here / ".SRCINFO").read_text() == generated
+
+
+# --- Second review pass (2026-10): residual gaps in the first fixes. ---
+
+
+@pytest.mark.xfail(
+    strict=True, reason="second pass 2: a shared holding directory is accepted"
+)
+def test_s2_a_holding_directory_others_can_write_is_refused(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    holding.chmod(0o777)
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+
+    with pytest.raises(SystemExit):
+        expirito.read_config(config)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="second pass 3: the purge root is not mount-checked"
+)
+def test_s3_a_mounted_purge_root_is_not_purged(tmp_path, monkeypatch):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    held.mkdir(parents=True)
+    (held / "someone-elses.txt").write_text("on a mount")
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+    monkeypatch.setattr(expirito, "mount_points", lambda: {str(held)})
+    monkeypatch.setattr(expirito, "time", Clock(30))
+
+    failures = expirito.main(config, False)
+
+    assert (held / "someone-elses.txt").exists()
+    assert failures
+
+
+@pytest.mark.xfail(
+    strict=True, reason="second pass 3: an unreadable mount table means no mounts"
+)
+def test_s3_an_unreadable_mount_table_stops_the_run(tmp_path, monkeypatch):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    (scratch / "old.txt").write_text("expiring")
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+    monkeypatch.setattr(
+        expirito, "MOUNTINFO", tmp_path / "no-such-mountinfo", raising=False
+    )
+    monkeypatch.setattr(expirito, "time", Clock(61))
+
+    failures = expirito.main(config, False)
+
+    assert (scratch / "old.txt").exists()
+    assert failures
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="second pass 5: rename replaces a destination made after naming",
+)
+def test_s5_a_destination_created_late_is_never_replaced(tmp_path, monkeypatch):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    (scratch / "report").write_text("expiring now")
+    chosen = expirito.free_name
+
+    def choose_then_race(folder, name):
+        path = chosen(folder, name)
+        path.write_text("created by someone else after the name was chosen")
+        return path
+
+    monkeypatch.setattr(expirito, "free_name", choose_then_race)
+    expirito.clean_folder(scratch, 60, holding, False, time.time() + 61 * DAY)
+
+    assert (held / "report").read_text().startswith("created by someone else")
+    contents = [p.read_text() for p in held.iterdir()]
+    assert "expiring now" in contents or (scratch / "report").exists()
+
+
+@pytest.mark.xfail(strict=True, reason="second pass 6: an uninspectable tree exits 0")
+def test_s6_an_uninspectable_tree_makes_the_run_fail(tmp_path, monkeypatch):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    hidden = scratch / "job" / "private"
+    hidden.mkdir(parents=True)
+    hidden.chmod(0)
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+    monkeypatch.setattr(expirito, "time", Clock(61))
+    try:
+        failures = expirito.main(config, False)
+    finally:
+        hidden.chmod(0o755)
+
+    assert (scratch / "job").exists()
+    assert failures
+
+
+@pytest.mark.xfail(
+    strict=True, reason="second pass 6: ENOENT from the destination is swallowed"
+)
+def test_s6_a_rename_failing_on_its_destination_is_a_failure(tmp_path, monkeypatch):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    (scratch / "old.txt").write_text("expiring")
+    gone = tmp_path / "vanished-parent"
+
+    def missing_parent(holding_directory, parts, create):
+        return gone  # as if the destination folder disappeared before the rename
+
+    monkeypatch.setattr(expirito, "holding_subdir", missing_parent)
+    failures = expirito.clean_folder(
+        scratch, 60, holding, False, time.time() + 61 * DAY
+    )
+
+    assert (scratch / "old.txt").exists()
+    assert failures
+
+
+@pytest.mark.xfail(
+    strict=True, reason="second pass 7: dry run does not reserve planned names"
+)
+def test_s7_dry_run_plans_the_same_destinations_as_the_run(tmp_path, caplog):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    held.mkdir(parents=True)
+    (held / "report").write_text("held earlier")
+    (scratch / "report").write_text("a")
+    (scratch / "report.1").write_text("b")
+    now = time.time() + 61 * DAY
+
+    def destinations(prefix):
+        return sorted(
+            r.getMessage().rsplit(" to ", 1)[1]
+            for r in caplog.records
+            if r.getMessage().startswith(prefix)
+        )
+
+    with caplog.at_level("INFO"):
+        expirito.clean_folder(scratch, 60, holding, True, now)
+        planned = destinations("Would move")
+        caplog.clear()
+        expirito.clean_folder(scratch, 60, holding, False, now)
+        moved = destinations("Moved")
+
+    assert planned == moved
+
+
+def test_s8_moving_into_holding_restarts_the_entry_clock(tmp_path):
+    """Everything about the grace period rests on rename updating ctime."""
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    job = scratch / "job"
+    job.mkdir()
+    long_ago = time.time() - 200 * DAY
+    os.utime(job, (long_ago, long_ago))
+    before = time.time()
+    time.sleep(0.01)
+
+    expirito.clean_folder(scratch, 0, holding, False)  # real clock, expire now
+
+    moved = held / "job"
+    assert moved.is_dir()
+    assert expirito.last_touched(moved) >= before
+    expirito.clean_folder(held, 14, None, False, time.time() + 13 * DAY)
+    assert moved.is_dir()
+    expirito.clean_folder(held, 14, None, False, time.time() + 15 * DAY)
+    assert not moved.exists()
