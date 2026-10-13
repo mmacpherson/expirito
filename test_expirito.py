@@ -330,7 +330,6 @@ def test_7_a_read_only_held_file_is_still_deleted(tmp_path):
     assert not (held / "readonly").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="review finding 8: failures are swallowed")
 def test_8_failures_make_the_run_exit_nonzero(tmp_path, monkeypatch):
     scratch, holding, held = scratch_with_holding(tmp_path)
     locked = scratch / "locked"

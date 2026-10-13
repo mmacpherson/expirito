@@ -247,7 +247,7 @@ def clean_folder(
     holding_directory: Path | None,
     dry_run: bool,
     current_time: float | None = None,
-) -> None:
+) -> int:
     """Clean up files and empty directories in the folder based on their age.
 
     Each top-level entry expires as a unit: a folder goes only when nothing in
@@ -262,11 +262,14 @@ def clean_folder(
                            empty directories are moved here instead of being deleted.
         dry_run: If True, print the actions without actually making changes.
         current_time: Seconds since the epoch to age entries against; now if None.
+
+    Returns:
+        The number of entries that could not be moved or deleted.
     """
     # Security check: validate folder_path
     if not validate_path(folder_path):
         logger.error(f"Invalid path: {folder_path}")
-        return
+        return 1
 
     if current_time is None:
         current_time = time.time()
@@ -274,8 +277,9 @@ def clean_folder(
         entries = sorted(folder_path.iterdir())
     except OSError as e:
         logger.error(f"Cannot list {folder_path}: {e}")
-        return
+        return 1
     mounts = mount_points()
+    failures = 0
     for entry_path in entries:
         if contains_holding(entry_path, holding_directory):
             continue
@@ -308,6 +312,8 @@ def clean_folder(
         except (OSError, ValueError) as e:
             verb = "move" if holding_directory else "delete"
             logger.error(f"Failed to {verb} {entry_path}: {e}")
+            failures += 1
+    return failures
 
 
 def delete_entry(entry_path: Path) -> None:
@@ -482,11 +488,13 @@ def main(config_path: Path, dry_run: bool) -> int:
             logger.error(f"Another expirito run holds {holding_directory / LOCK_NAME}")
             return 1
     try:
-        clean_all(config, holding_directory, holding_age_limit, dry_run)
+        failures = clean_all(config, holding_directory, holding_age_limit, dry_run)
     finally:
         if lock:
             lock.close()
-    return 0
+    if failures:
+        logger.error(f"{failures} entr{'y' if failures == 1 else 'ies'} left undone")
+    return failures
 
 
 def clean_all(
@@ -494,14 +502,19 @@ def clean_all(
     holding_directory: Path,
     holding_age_limit: int,
     dry_run: bool,
-) -> None:
-    """Expire each monitored directory into holding, then purge its holding."""
+) -> int:
+    """Expire each monitored directory into holding, then purge its holding.
+
+    Returns:
+        The number of failures across all directories.
+    """
+    failures = 0
     for directory in config["directories"]:
         folder_path = Path(directory["path"])
         days_old = directory["age_limit"]
 
         # Move to holding pass.
-        clean_folder(folder_path, days_old, holding_directory, dry_run)
+        failures += clean_folder(folder_path, days_old, holding_directory, dry_run)
 
         # Delete from holding pass.
         try:
@@ -510,9 +523,11 @@ def clean_all(
             )
         except OSError as e:
             logger.error(f"Not purging holding for {folder_path}: {e}")
+            failures += 1
             continue
         if deletion_path.is_dir():
-            clean_folder(deletion_path, holding_age_limit, None, dry_run)
+            failures += clean_folder(deletion_path, holding_age_limit, None, dry_run)
+    return failures
 
 
 def cli() -> None:
@@ -525,7 +540,7 @@ def cli() -> None:
         logger.error(f"Configuration file not found at {config_path}")
         sys.exit(1)
 
-    main(config_path, args.dry_run)
+    sys.exit(1 if main(config_path, args.dry_run) else 0)
 
 
 if __name__ == "__main__":
