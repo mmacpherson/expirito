@@ -41,7 +41,11 @@ directory and eventually deletes them after a defined period.
   followed by a rename.
 - Moves are plain renames on one filesystem, never copy-then-delete, so the
   holding directory must be on the same filesystem (and btrfs subvolume) as
-  every watched directory; expirito checks this at startup. An entry
+  every watched directory; expirito checks this at startup. The check
+  compares devices, so it cannot see a watched directory reached through a
+  separate bind mount of the same filesystem: renames across mount instances
+  fail too (each move fails and the source is kept). Watch and hold through
+  the same mount. An entry
   that is or contains a mount point is left alone and logged; on Linux, a mount
   table that cannot be read stops the run.
 - Each entry is checked again just before it is moved or deleted, and only one
