@@ -767,3 +767,52 @@ def test_a_directory_pattern_does_not_protect_a_link_to_a_folder(tmp_path):
 
     assert not (scratch / "keep").is_symlink()  # the link expired as a link
     assert (outside / "precious").exists()  # its target was never touched
+
+
+# --- 1.3.1 ---
+
+
+@pytest.fixture
+def other_filesystem(tmp_path):
+    """A private folder on a different filesystem from tmp_path, if there is one."""
+    import shutil as sh
+    import tempfile
+
+    shm = Path("/dev/shm")
+    if not shm.is_dir() or shm.stat().st_dev == tmp_path.stat().st_dev:
+        pytest.skip("no second filesystem to test with")
+    d = Path(tempfile.mkdtemp(dir=shm))
+    d.chmod(0o700)
+    yield d
+    sh.rmtree(d, ignore_errors=True)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="1.3.1: holding on another filesystem is accepted"
+)
+def test_holding_on_another_filesystem_is_refused(tmp_path, other_filesystem):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    holding = other_filesystem / "holding"
+    holding.mkdir(mode=0o700)
+    config = write_config(tmp_path / "c.yaml", holding, scratch)
+
+    with pytest.raises(SystemExit):
+        expirito.read_config(config)
+
+
+@pytest.mark.xfail(strict=True, reason="1.3.1: ignored entries are still age-scanned")
+def test_an_ignored_unreadable_folder_does_not_fail_the_run(tmp_path):
+    scratch, holding, held = scratch_with_holding(tmp_path)
+    private = scratch / "vpn-pod" / "config"
+    private.mkdir(parents=True)
+    private.chmod(0)
+    try:
+        failures = expirito.clean_folder(
+            scratch, 60, holding, False, time.time() + 61 * DAY, ignore=["/vpn-pod/"]
+        )
+    finally:
+        private.chmod(0o755)
+
+    assert failures == 0
+    assert (scratch / "vpn-pod").exists()
