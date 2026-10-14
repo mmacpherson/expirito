@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 import argparse
 import contextlib
@@ -310,6 +310,17 @@ def contains_mount(entry_path: Path, mounts: set[str]) -> bool:
     return any(m == entry or m.startswith(entry + "/") for m in mounts)
 
 
+def ignores_entry(entry_path: Path, root: Path, spec: GitIgnoreSpec) -> bool:
+    """Whether the top-level entry itself matches an ignore pattern.
+
+    Checked before the entry's tree is scanned, so an ignored folder is never
+    read at all (it may be unreadable, or simply large).
+    """
+    is_dir = entry_path.is_dir() and not entry_path.is_symlink()
+    relative = entry_path.relative_to(root).as_posix() + ("/" if is_dir else "")
+    return spec.match_file(relative)
+
+
 def is_ignored(entry_path: Path, root: Path, spec: GitIgnoreSpec) -> bool:
     """Whether a top-level entry matches an ignore pattern or holds something that
     does: moving a folder moves everything in it, so a folder holding an ignored
@@ -420,6 +431,9 @@ def clean_folder(
         try:
             if spans_a_mount(entry_path):
                 logger.warning(f"Keeping {entry_path}: it is or contains a mount point")
+                continue
+            if spec and ignores_entry(entry_path, folder_path, spec):
+                logger.info(f"Keeping {entry_path}: it matches an ignore pattern")
                 continue
             if not expired(entry_path, days_old, current_time):
                 continue
@@ -628,6 +642,21 @@ def read_config(config_path: Path) -> dict[str, Any]:
             if a == b or a in b.parents or b in a.parents:
                 logger.error(f"Watched directories must not repeat or nest: {a}, {b}")
                 sys.exit(1)
+
+    # Moves are renames, which cannot cross filesystems (nor btrfs subvolumes,
+    # which have their own device numbers): say so now rather than fail every
+    # move during the run.
+    holding_device = holding_dir.stat().st_dev
+    for cd in config["directories"]:
+        dir_path = Path(cd["path"])
+        if dir_path.exists() and dir_path.stat().st_dev != holding_device:
+            logger.error(
+                f"Watched directory [{dir_path}] is on a different filesystem from "
+                f"the holding directory [{holding_dir}]; entries could not be moved "
+                "into holding. Put the holding directory on the same filesystem "
+                "(and btrfs subvolume) as the directories it serves."
+            )
+            sys.exit(1)
 
     return config
 

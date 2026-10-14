@@ -39,7 +39,9 @@ directory and eventually deletes them after a defined period.
   on. On Linux the move is one atomic no-replace rename (`renameat2`), so this
   holds even if a name is taken at the last moment; elsewhere it is a check
   followed by a rename.
-- Moves are plain renames on one filesystem, never copy-then-delete. An entry
+- Moves are plain renames on one filesystem, never copy-then-delete, so the
+  holding directory must be on the same filesystem (and btrfs subvolume) as
+  every watched directory; expirito checks this at startup. An entry
   that is or contains a mount point is left alone and logged; on Linux, a mount
   table that cannot be read stops the run.
 - Each entry is checked again just before it is moved or deleted, and only one
@@ -98,7 +100,8 @@ log_file: actions.log
 - `ignore` (optional, per directory): gitignore-style patterns for entries
   expirito must never move or delete, matched relative to that directory. A
   folder holding a match is kept whole, since moving it would move the match.
-  Patterns are checked at startup, before anything is touched. Watched
+  Patterns are checked at startup, before anything is touched, and an entry
+  matching one is skipped before its contents are read. Watched
   directories must not repeat or nest, so each path is governed by exactly one
   set of patterns.
 - `log_file`: The path to the log file where Expirito will log its actions.

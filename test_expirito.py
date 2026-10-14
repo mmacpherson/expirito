@@ -787,9 +787,6 @@ def other_filesystem(tmp_path):
     sh.rmtree(d, ignore_errors=True)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="1.3.1: holding on another filesystem is accepted"
-)
 def test_holding_on_another_filesystem_is_refused(tmp_path, other_filesystem):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
@@ -801,7 +798,6 @@ def test_holding_on_another_filesystem_is_refused(tmp_path, other_filesystem):
         expirito.read_config(config)
 
 
-@pytest.mark.xfail(strict=True, reason="1.3.1: ignored entries are still age-scanned")
 def test_an_ignored_unreadable_folder_does_not_fail_the_run(tmp_path):
     scratch, holding, held = scratch_with_holding(tmp_path)
     private = scratch / "vpn-pod" / "config"
